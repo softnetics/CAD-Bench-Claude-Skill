@@ -45,6 +45,19 @@ insert", "inner corner radius = corner_r − wall, must stay positive". These
 become `wall_check()` calls in the model and check rows on the bench, and
 they are the point: a bounding box cannot see any of them.
 
+**When the retention/mounting MECHANISM itself — not just its dimensions —
+is being inferred from a photo or hand sketch, confirm the mechanism before
+building the feature tree, not after.** A photo of a keyhole cutout can be
+read as "bolt through a round hole," "boss with a bore," "stadium slot," or
+"round head + narrower neck" — each is a legitimate reading of the same
+picture and each demands a structurally different model. Getting this wrong
+doesn't surface as a `wall_check` failure or a bad boolean; the part builds
+cleanly, passes every gate, and is simply the wrong mechanism, discovered
+only when someone who knows the real hardware looks at it. If the next
+change would replace how the part is HELD IN PLACE (not just resize it),
+say back in one sentence what you think the mechanism is before writing the
+new feature tree.
+
 **Reverse-engineering an existing, source-less STL instead of designing
 something new?** Different failure mode, different method — go to
 `references/stl-reverse-engineering.md` before sampling a single point by

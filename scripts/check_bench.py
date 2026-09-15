@@ -90,7 +90,38 @@ function bboxOf(tag, attrsStr, inner) {
     if ([x, y].some(Number.isNaN)) return null;
     const charW = fs * 0.56;   // rough average glyph width, IBM Plex Sans
     const w = (inner || '').length * charW;
-    return {x0: x, y0: y - fs * 0.82, x1: x + w, y1: y + fs * 0.28, text: inner};
+    // text-anchor changes which edge x actually is -- assuming 'start'
+    // unconditionally (the previous behaviour) reads a right/centre
+    // anchored label's real footprint as shifted by up to its own full
+    // width, which both hides genuine collisions and flags non-existent
+    // ones. Found the hard way: a "start"-only checker made every
+    // anchor="end"/"middle" label in a real recipe look like it collided
+    // with geometry it was actually nowhere near.
+    const anchor = a['text-anchor'] || 'start';
+    let x0 = x, x1 = x + w;
+    if (anchor === 'end') { x0 = x - w; x1 = x; }
+    else if (anchor === 'middle') { x0 = x - w / 2; x1 = x + w / 2; }
+    let box = {x0, y0: y - fs * 0.82, x1, y1: y + fs * 0.28, text: inner};
+    box.y1 = y + fs * 0.28;
+    // transform="rotate(deg cx cy)" -- e.g. a vertical dimension label --
+    // rotates the glyph run about (cx,cy); rotate the box's own four
+    // corners about that point and take their bounds, rather than
+    // ignoring the transform (which reads a tall, narrow rotated label as
+    // its wide, short unrotated footprint -- wrong in both directions).
+    const rot = (a.transform || '').match(/rotate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/);
+    if (rot) {
+      const deg = +rot[1], cx = +rot[2], cy = +rot[3], rad = deg * Math.PI / 180;
+      const cos = Math.cos(rad), sin = Math.sin(rad);
+      const corners = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]]
+        .map(([px, py]) => {
+          const dx = px - cx, dy = py - cy;
+          return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+        });
+      const xs = corners.map(c => c[0]), ys = corners.map(c => c[1]);
+      box = {x0: Math.min(...xs), y0: Math.min(...ys),
+             x1: Math.max(...xs), y1: Math.max(...ys), text: inner};
+    }
+    return box;
   }
   return null;
 }
@@ -121,6 +152,24 @@ function checkLayout(svg) {
           + s.tag + '> (' + Math.round(100 * ov / tArea) + '% overlap) -- unreadable');
     }
   }
+  // TEXT-ON-TEXT: two labels landing on the same pixels are just as
+  // unreadable as a label under a shape, and just as easy to introduce --
+  // a caption placed at a fixed (x,y) that another label's own computed
+  // position later lands on top of, or two texts sharing one reserved
+  // strip that both assume they own alone. Flag any pair whose boxes
+  // overlap more than ~25% of the smaller one's area.
+  for (let i = 0; i < texts.length; i++)
+    for (let j = i + 1; j < texts.length; j++) {
+      const a = texts[i], b = texts[j];
+      const smaller = Math.min(bboxArea(a), bboxArea(b));
+      if (smaller <= 0) continue;
+      const ov = bboxIntersect(a, b);
+      const frac = ov / smaller;
+      if (frac > 0.25)
+        problems.push('text "' + (a.text || '').slice(0, 24) + '" overlaps text "'
+          + (b.text || '').slice(0, 24) + '" (' + Math.round(100 * frac)
+          + '% of the smaller one) -- unreadable');
+    }
   // Two SOLID ("part"-fill) shapes heavily overlapping is the two-views-
   // drawn-in-the-same-region bug. A hole in a boss is NOT this: holes are
   // void-fill, so restricting to part-vs-part avoids flagging that.
@@ -170,6 +219,45 @@ try {
           if (!(q.val >= q.min && q.val <= q.max))
             rec.problems.push('default out of range: ' + q.id);
           if (!(q.step > 0)) rec.problems.push('non-positive step: ' + q.id);
+        }
+
+        // MODEL/RECIPE PARAMETER PARITY -- the recipe's own sliders and the
+        // Python model's PARAMS dict are two independent lists of the same
+        // thing, kept in sync by hand across however many redesigns a part
+        // goes through. Nothing else catches the moment they drift: a
+        // slider removed from PARAMS but left in the recipe reads as a
+        // silently-ignored no-op override; a new PARAMS key with no slider
+        // means the bench can never actually set it. Only checked for .py
+        // models (PARAMS = {...} is a stable, greppable shape); .fs files
+        // use FeatureScript const blocks matched via each slider's own
+        // 'fs' field instead, a different mechanism this does not cover.
+        // NOTE for future edits to this block: it lives inside the probe
+        // TEMPLATE LITERAL below (the backtick-quoted string assigned to
+        // \`probe\`), which is itself parsed as ordinary JS when this whole
+        // HARNESS runs -- so backslashes in any regex literal written here
+        // are consumed ONCE as template-literal string escapes (\\s -> s,
+        // \\{ -> {, silently, no error) BEFORE the string ever reaches
+        // eval(). Every backslash in a regex literal in this block must
+        // therefore be DOUBLED. Nothing else in this file needs that
+        // (checkLayout/bboxOf above are plain top-level HARNESS code, not
+        // inside this template literal) -- found by diffing a dumped copy
+        // of the exact eval()'d source against what was actually written.
+        if (P.file && /\.py$/.test(P.file) && fs.existsSync(P.file)) {
+          const src = fs.readFileSync(P.file, 'utf8');
+          const blockM = src.match(/PARAMS\\s*=\\s*\\{([\\s\\S]*?)\\n\\}/);
+          if (blockM) {
+            const modelKeys = new Set([...blockM[1].matchAll(/^\\s*"(\\w+)"\\s*:/gm)].map(mm => mm[1]));
+            const recipeKeys = ids;
+            const missingInRecipe = [...modelKeys].filter(k => !recipeKeys.has(k));
+            const missingInModel = [...recipeKeys].filter(k => !modelKeys.has(k));
+            if (missingInRecipe.length)
+              rec.problems.push('PARAMS has no matching slider: ' + missingInRecipe.join(', ')
+                + ' -- the bench page can never set ' + (missingInRecipe.length > 1 ? 'these' : 'this'));
+            if (missingInModel.length)
+              rec.problems.push('slider has no matching PARAMS key: ' + missingInModel.join(', ')
+                + ' -- a hand-off value for ' + (missingInModel.length > 1 ? 'these is' : 'this is')
+                + ' silently dropped by the model own-override filter');
+          }
         }
 
         // Reading a key that does not exist is THE bug of this file format:

@@ -22,6 +22,8 @@ B.export_verified(part, "part.stl", "part")
 4. Order of operations
 5. Tessellation and verification
 6. Builder mode vs algebra mode
+7. Fitting a curved face against a cylinder — inside vs outside
+8. A rotation or mirror's sign is not obvious by inspection — check it
 
 ---
 
@@ -271,3 +273,83 @@ to algebra.
 
 Mixing is fine and normal: build lofted pieces in builder blocks, combine
 them with `+` and `-`.
+
+## 7. Fitting a curved face against a cylinder — inside vs outside
+
+A part that mounts against a cylindrical wall (a boss glued to a pole, a
+plug fitting inside a tube, a wedge glued to the inside of a skirt) needs
+one of two DIFFERENT booleans depending on which side of the wall it sits
+on, and it is easy to pick the wrong one because both "just work" (produce
+a valid, watertight, plausible-looking solid) — the mistake is only visible
+as a real-world fit problem, not a modelling error.
+
+**Material OUTSIDE a cylinder of radius `R`** (a boss clamped onto the
+*outside* of a pole) — subtract a hollow cylinder from a box that starts at
+the axis:
+
+```python
+blank = B.Box(span, w, h, align=(B.Align.MIN, B.Align.CENTER, B.Align.CENTER))
+blank -= B.Cylinder(R, tall)          # removes X < R, leaves X > R
+```
+
+The resulting back face is **concave** (it cups around the pole, like a
+saddle) — correct for a part that hugs a convex surface from outside.
+
+**Material INSIDE a cylinder of radius `R`** (a plug or liner fitting
+*inside* a tube) — the mirror-image intent, but NOT the mirror-image
+construction: build a box that ends flush at `X = R` and reaches inward,
+then **intersect** (not subtract) with a *filled* cylinder to trim the flat
+end cap back to the true curve:
+
+```python
+blank = B.Box(span, w, h, align=(B.Align.MAX, B.Align.CENTER, B.Align.CENTER))
+blank = B.Pos(R + eps, 0, 0) * blank    # ends at X=R+eps, extends inward
+blank &= B.Cylinder(R, tall)            # trims the flat cap to the true curve
+```
+
+The resulting back face is **convex** (it bulges toward the wall, like the
+outside of the same cylinder) — correct for a part that fits a concave
+surface from inside.
+
+**Do not try to get from one to the other by mirroring the finished solid
+about a plane tangent to the cylinder (e.g. the plane `X = R`).** This looks
+right (a reflection ought to flip inside/outside) and is wrong: reflecting a
+*curved* boundary about a plane that only touches it at one point does not
+reproduce the same curve on the other side — it produces a different curve
+that pokes back past the wall away from the tangent point. Verified the hard
+way: mirroring a correctly-built "outside" wedge about its own tangent plane
+gave a solid whose edges stuck out past `R` instead of receding from it. If
+you need a mirror image, mirror about a plane that keeps the SAME side of
+the wall (e.g. `Plane.XZ` to flip left/right along a cylinder whose axis is
+already `Z`) — never about a plane meant to flip which side of the curve the
+material is on.
+
+## 8. A rotation or mirror's sign is not obvious by inspection — check it
+
+`rotate(Axis(...), angle)`, which face a `mirror(Plane(...))` keeps, which
+half a `Box(align=MIN/MAX...)` occupies — these all have a definite,
+deterministic answer, but the sign/direction is very easy to get backwards
+by reasoning about it on paper, especially once a construction has been
+adapted from a mirror-image or previous-revision version of itself (see §7
+above for a real example: fixing "concave should be convex" took one wrong
+attempt before the right one, and the right one still needed its rotation
+sign re-derived from scratch rather than reasoned out).
+
+**Before trusting a sign/orientation choice in the full model, check it
+numerically against an independent expectation**, e.g.:
+
+```python
+# Does the top edge really come out to wedge_min_t, and the bottom to
+# wedge_max_t, or did the taper direction get flipped?
+for z, want in [(h/2 - 0.05, min_t), (-h/2 + 0.05, max_t)]:
+    slice_ = (B.Pos(0, 0, -z) * part) & B.Box(1000, 1000, 0.02)
+    bb = slice_.bounding_box()
+    got = bb.max.X - bb.min.X
+    assert abs(got - want) < 0.05, f"z={z}: got {got}, want {want}"
+```
+
+or simpler, just print `part.bounding_box()` / a thin slice's thickness and
+compare by hand before it goes into `build()` for real. This costs a few
+seconds per check and catches a class of bug that otherwise only shows up
+after printing the part (or, worse, after being told by someone else that
+the part is backwards).
