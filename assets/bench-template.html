@@ -103,45 +103,78 @@
   .msg.err{color:var(--warn)} .msg.ok{color:var(--ok)}
   footer{color:var(--ink-2);font-size:12.5px;border-top:1px solid var(--rule);padding-top:14px;max-width:78ch}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+  /* ---- Home / preview / edit navigation ------------------------------
+     Landing page is a plain list of part names; clicking one opens a
+     read-only PREVIEW (drawing + checks, no sliders); "Edit dimensions"
+     from there reveals the full slider panel. See showView()/openPart(). */
+  .home{display:flex;flex-direction:column;gap:8px}
+  .home-item{display:flex;align-items:center;justify-content:space-between;
+             gap:16px;width:100%;padding:14px 16px;border:1px solid var(--rule);
+             border-radius:8px;background:var(--panel);cursor:pointer;
+             text-align:left;font:inherit;color:var(--ink)}
+  .home-item:hover{border-color:var(--part-line)}
+  .home-item:focus-visible{outline:2px solid var(--part-line);outline-offset:2px}
+  .hi-name{font-size:15px;font-weight:500;display:block}
+  .hi-file{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;
+           color:var(--ink-2);display:block;margin-top:2px}
+  .hi-arrow{color:var(--ink-2);font-size:20px;flex-shrink:0}
+  .backbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .backbar button{margin:0}
+  .cols.preview-mode{grid-template-columns:1fr}
+  .previewbar{display:flex;justify-content:flex-end}
 </style>
 
 <div class="wrap">
   <header>
     <h1>CAD Bench</h1>
     <p class="sub">Set a part's dimensions against the constraints that actually bind, watch the checks go green, then hand the values back to Claude to regenerate the STL. Every part here pairs with a model in <span class="file">models/&lt;part&gt;.py</span>. Nothing on this page needs an account or a CAD tool.</p>
-    <div class="picker" id="picker"></div>
   </header>
 
-  <div class="cols">
-    <div id="controls"></div>
-    <div>
-      <div class="stage"><svg id="dwg" viewBox="0 0 620 400" role="img" aria-label="Orthographic views of the selected part"></svg></div>
-      <div class="derived" id="derived"></div>
-      <div class="checks" id="checks"></div>
-    </div>
-  </div>
+  <div class="home" id="home"></div>
 
-  <div class="io">
-    <div class="out">
-      <h2>Load current values</h2>
-      <p>Paste a <span class="file">const NAME = value * MM;</span> block to start the sliders from where the part is now.</p>
-      <textarea id="paste" spellcheck="false" placeholder="const PLATE_X = 60 * MM;&#10;const BOSS_D = 10 * MM;"></textarea>
-      <button id="load">Load into sliders</button>
-      <div class="msg" id="msg"></div>
+  <div id="editorArea" hidden>
+    <div class="backbar">
+      <button id="backHome" type="button">&larr; All parts</button>
+      <span class="file" id="editorFile"></span>
     </div>
-    <div class="out">
-      <h2>Parameters for the model</h2>
-      <p>These names match the model's <span class="file">PARAMS</span> keys. Hand them over and Claude reads them straight from this page &#8212; or copy them to paste yourself.</p>
-      <pre id="consts"></pre>
-      <div class="row-btn">
-        <button id="copy">Copy parameters</button>
-        <button id="send" class="primary" hidden>Hand these to Claude</button>
+
+    <div class="picker" id="picker"></div>
+
+    <div class="cols" id="cols">
+      <div id="controls"></div>
+      <div>
+        <div class="stage"><svg id="dwg" viewBox="0 0 620 400" role="img" aria-label="Orthographic views of the selected part"></svg></div>
+        <div class="derived" id="derived"></div>
+        <div class="checks" id="checks"></div>
+        <div class="previewbar" id="previewActions" hidden>
+          <button id="editBtn" class="primary" type="button">Edit dimensions &rarr;</button>
+        </div>
       </div>
-      <div class="handed" id="handed"></div>
     </div>
-  </div>
 
-  <footer id="note"></footer>
+    <div class="io" id="ioPanel">
+      <div class="out">
+        <h2>Load current values</h2>
+        <p>Paste a <span class="file">const NAME = value * MM;</span> block to start the sliders from where the part is now.</p>
+        <textarea id="paste" spellcheck="false" placeholder="const PLATE_X = 60 * MM;&#10;const BOSS_D = 10 * MM;"></textarea>
+        <button id="load">Load into sliders</button>
+        <div class="msg" id="msg"></div>
+      </div>
+      <div class="out">
+        <h2>Parameters for the model</h2>
+        <p>These names match the model's <span class="file">PARAMS</span> keys. Hand them over and Claude reads them straight from this page &#8212; or copy them to paste yourself.</p>
+        <pre id="consts"></pre>
+        <div class="row-btn">
+          <button id="copy">Copy parameters</button>
+          <button id="send" class="primary" hidden>Hand these to Claude</button>
+        </div>
+        <div class="handed" id="handed"></div>
+      </div>
+    </div>
+
+    <footer id="note"></footer>
+  </div>
 </div>
 
 <script>
@@ -370,17 +403,60 @@ const PARTS = {
 
 };
 
-let KEY = "boss-plate";
+let KEY = null;
+// 'home' -- just the list of part names, no drawing, no sliders.
+// 'preview' -- drawing + cards + checks for the clicked part, READ-ONLY
+//   (sliders hidden) -- confirms which part you're looking at before
+//   committing to editing it.
+// 'edit' -- the full experience: sliders, drawing, checks, hand-off panel.
+let VIEW = 'home';
 const el=id=>document.getElementById(id);
 const P=()=>PARTS[KEY];
 const vals=()=>{const o={}; P().params.forEach(q=>o[q.id]=parseFloat(el(q.id).value)); return o;};
 const fmt=(n,d=2)=>Number(n.toFixed(d)).toString();
 
+// ---- Home page: just names. Clicking one opens a read-only preview, not
+// straight into the sliders -- see openPart()/showView().
+function buildHome(){
+  el("home").innerHTML = Object.entries(PARTS).map(([k,v])=>
+    `<button class="home-item" type="button" data-k="${k}">`
+    +`<span><span class="hi-name">${v.label}</span>`
+    +`<span class="hi-file">${v.file}</span></span>`
+    +`<span class="hi-arrow" aria-hidden="true">›</span></button>`).join("");
+  el("home").querySelectorAll(".home-item").forEach(b=>
+    b.addEventListener("click",()=>openPart(b.dataset.k)));
+}
+
+// Opens a part straight into PREVIEW (never straight into edit, whether
+// reached from the home list or from the picker while already inside the
+// editor) -- one consistent rule for "how did I get here" instead of two
+// different entry behaviours depending on where the click came from.
+function openPart(k){
+  KEY=k; VIEW='preview';
+  buildControls(); render(); buildPicker(); showView();
+}
+
+// Shows/hides whole regions for the current VIEW. Cheap and total (no
+// partial-update bugs to chase) since every region here is built fresh by
+// buildControls()/render() on the same tick this runs.
+function showView(){
+  const isHome = VIEW==='home';
+  el("home").hidden = !isHome;
+  el("editorArea").hidden = isHome;
+  if(isHome) return;
+  const isPreview = VIEW==='preview';
+  el("cols").classList.toggle("preview-mode", isPreview);
+  el("controls").hidden = isPreview;
+  el("ioPanel").hidden = isPreview;
+  el("previewActions").hidden = !isPreview;
+  el("editorFile").textContent = P().file;
+}
+
 function buildPicker(){
   el("picker").innerHTML = Object.entries(PARTS).map(([k,v])=>
     `<button data-k="${k}" aria-pressed="${k===KEY}">${v.label}</button>`).join("");
   el("picker").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
-    KEY=b.dataset.k; buildControls(); render(); buildPicker();
+    openPart(b.dataset.k);   // always lands on preview, same rule as the home list
   }));
 }
 
@@ -524,7 +600,10 @@ el("copy").addEventListener("click",async()=>{
   setTimeout(()=>b.textContent="Copy parameters",1800);
 });
 
-buildPicker(); buildControls(); render();
+el("backHome").addEventListener("click", ()=>{ VIEW='home'; showView(); });
+el("editBtn").addEventListener("click", ()=>{ VIEW='edit'; showView(); });
+
+buildHome(); buildPicker(); showView();
 
 // ---- Handover ------------------------------------------------------
 // The sliders live in this browser and never reach Claude on their own.

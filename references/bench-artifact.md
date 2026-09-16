@@ -17,6 +17,7 @@ already wired. Publish it as-is on first use; extend `PARTS` thereafter.
 4. The SVG helper vocabulary
 5. The handoff: writing `bench/<part>` and reading it back
 6. Extending the shared page without breaking it
+7. Home / preview / edit navigation
 
 ---
 
@@ -308,8 +309,9 @@ each hand-off. Nothing else writes there.
 
 1. `Artifact action:read url:<artifact-url>` to get the current HTML into a
    local file.
-2. Add your new key to the `PARTS` object. Leave `let KEY = "<first-part>"`
-   pointing at whatever it was -- the picker lets the user switch.
+2. Add your new key to the `PARTS` object. Nothing else needs to change to
+   point at it -- the page opens on the home list (§7), not on a specific
+   part, so there is no `let KEY = "<first-part>"` to keep in sync any more.
 3. Keep the existing parts byte-for-byte. They have their own `bench/<part>`
    rows and users may be mid-tweak.
 4. Republish to the **same URL** (`Artifact file_path:<file> url:<artifact-url>`),
@@ -318,3 +320,59 @@ each hand-off. Nothing else writes there.
    part's model `PARAMS` in the same change, and note it to the user -- their
    stored `bench/<part>` row and their `localStorage` slider state are now
    partly stale.
+
+## 7. Home / preview / edit navigation
+
+The page opens on a **home list** -- just the part names and their model
+file, nothing else -- not straight into whichever part happened to load
+first. Clicking a name opens a **read-only preview**: the drawing, the
+derived-value cards, the checks, all rendered from that part's own default
+values, but no sliders. An **"Edit dimensions →"** button on that preview
+is what actually reveals the slider panel. This exists so opening the page
+(or switching parts) shows you *what a part is* before committing to
+*changing it* -- useful once a bench page holds more than two or three
+parts and "which one was I looking at" stops being obvious from a wall of
+sliders.
+
+Three states, one function each:
+
+```js
+let KEY = null;         // no part selected until one is opened
+let VIEW = 'home';      // 'home' | 'preview' | 'edit'
+
+function openPart(k){   // called from BOTH the home list and the picker --
+  KEY=k; VIEW='preview'; // one rule for "how did I get here": always preview,
+  buildControls(); render(); buildPicker(); showView();  // never straight to edit
+}
+
+function showView(){
+  const isHome = VIEW==='home';
+  el("home").hidden = !isHome;
+  el("editorArea").hidden = isHome;
+  if(isHome) return;
+  const isPreview = VIEW==='preview';
+  el("cols").classList.toggle("preview-mode", isPreview);  // collapses the
+  el("controls").hidden = isPreview;                        // 340px slider
+  el("ioPanel").hidden = isPreview;                          // column to 0
+  el("previewActions").hidden = !isPreview;
+  el("editorFile").textContent = P().file;
+}
+```
+
+**The picker (the row of part-name tabs shown once you're past the home
+page) always lands on PREVIEW too, even when switching from inside an
+active edit session** -- one consistent rule rather than "home click goes
+to preview, picker click goes straight to edit." If that's ever
+inconvenient enough to change, change it in `openPart()` alone; nothing
+else needs to know which state a click came from.
+
+**This costs nothing at the `check_bench.py` / model-parity level.** The
+headless checker evaluates `PARTS[key].derive/checks/draw` directly against
+each part's own default and extreme slider values -- it never touches
+`buildHome`, `openPart`, `showView`, or any other page-navigation function,
+so restructuring how a part gets ON screen has no effect on whether its own
+numbers are still correct. Verified by running `check_bench.py` before and
+after adding this navigation and confirming the problem count didn't
+change, then a real click-through (home → preview → edit → back) in the
+browser pane to confirm the states themselves behave, since that's the one
+thing the headless checker cannot see.
