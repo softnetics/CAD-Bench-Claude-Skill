@@ -163,16 +163,31 @@ from 19.5 mm to 23.8 mm over the same range — a sub-0.1 mm residual on a
 ~24 mm feature at the tight end means the surface **is** that primitive, not
 merely close to it, and the loose-threshold numbers were simply wrong.
 
-**Once fit, that curvature is FIXED geometry, not a bench slider.** Put the
+**Once fit, that curvature is FIXED geometry, not a bench slider** — put the
 fitted centre and radius as module-level constants in the model (see
-`cad/visor_template.py` for a worked example: `BODY_SPHERE_CENTER` /
-`BODY_SPHERE_RADIUS`), clearly commented as measured facts, and build the
-replacement as boolean geometry sharing that exact centre — e.g. two
-concentric spheres of that centre, one at the fixed radius (the surface that
-must stay flush) and one offset outward by a free "thickness"/"protrusion"
-parameter, clipped to a free footprint. Free dimensions then only change
-*where* the footprint clips the fixed surface, never the surface's own
-shape — which is what guarantees the part still mates correctly at any size
-the user dials. On the bench page, these fixed constants are read-only
-values baked into `derive()`, not `params` entries — there is nothing to put
-a slider on.
+`cad/visor_template.py`'s `BODY_SPHERE_CENTER` / `BODY_SPHERE_RADIUS`),
+clearly commented as measured facts. **But check first whether the part
+being replaced is actually a hollow shell with a distinct inner surface, or
+a solid blob whose "mating surface" is just the rear-facing portion of its
+own single boundary** (`is_watertight` alone doesn't tell you this — both a
+shell and a solid are watertight; check whether the mesh has one boundary
+component or two). Only the shell case can be rebuilt as two concentric
+spheres/cylinders (fixed radius inside, fixed-radius-plus-thickness
+outside) clipped to a free footprint and subtracted — this was tried on a
+SOLID part first and produced a badly wrong result: clipping a
+footprint anywhere near the sphere's own radius in size wraps a large
+fraction of the way around it, ballooning into an inflated dome bearing no
+resemblance to the real part (confirmed concretely: a 32mm-wide clip
+against a 23.67mm-radius fixed sphere produced 21mm of depth from a 6.8mm
+"wall thickness" setting). For a solid part, rebuild the OUTER shape
+directly from real per-slice measurements instead (per secs 1-4 above, but
+keeping each slice's actual centre, not just its span — a closed-form taper
+fit that assumes every slice shares one centre line can miss a real few-mm
+centre drift the mesh actually has) and treat the fixed sphere as a
+VALIDATION fact instead of a construction constraint: check how far the
+rebuilt part's own mating region sits from the fixed curvature, and gate on
+that, rather than forcing the geometry through it via boolean.
+
+On the bench page, whichever role the fixed constants play, they are
+read-only values baked into `derive()`, not `params` entries — there is
+nothing to put a slider on.

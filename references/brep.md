@@ -193,8 +193,37 @@ body = outer_loft - inner_loft      # inner profiles inset by the wall,
                                     # extended past both ends so it cuts clean
 ```
 
-Extend the inner loft a millimetre beyond each end of the outer one, or the
-coincident end faces leave zero-thickness slivers.
+Extend the inner loft a millimetre beyond each end of the outer one **when
+the inner surface has to punch through a separate face it doesn't share a
+plane with** — duct.py's flange is the case this rule is for: the inner
+loft's own ends don't lie in the flange's flat face, so without the
+extension the coincident geometry there leaves zero-thickness slivers.
+
+**When inner and outer loft the exact same end cross-sections instead (no
+separate abutting face), do NOT extend — let them share the same end
+planes.** There, `loft()`'s own end caps already do the work: outer's
+full-size cap minus inner's shrunk, coplanar cap at the identical z leaves a
+flat annular rim — precisely the open edge a shell needs, with no
+protruding pad. Adding a z-pad here doesn't just do nothing, it can
+introduce the exact instability described in the next paragraph, since it
+means feeding `loft()` more sections spaced unevenly near the ends.
+
+**A smooth (non-ruled) loft through many closely-spaced sections whose
+centre drifts non-monotonically can overshoot between samples and
+self-intersect — pass `ruled=True`.** Confirmed on a real 18-section loft
+(profiles' centre wobbled by ~2mm along the loft, a genuine feature of the
+source mesh, not noise): the default smooth spline loft tessellated to
+39,000–48,000 triangles (every other model in this project's own bench
+lands at 500–2,500) and reproducibly failed `export_verified`'s
+"not watertight" check from self-intersections in the subsequent boolean,
+even though the outer and inner lofts each individually tessellated fine on
+their own. Switching to `B.loft(ruled=True)` (linear interpolation between
+consecutive sections rather than a fitted spline) dropped the triangle count
+to ~3,600 and fixed it outright — with 18 real samples already close
+together, a ruled loft looks just as smooth and has no spline to overshoot.
+Prefer `ruled=True` by default whenever the section count is high (a dozen
+or more, e.g. reconstructing a profile straight from measured mesh data)
+rather than waiting for a mysterious watertightness failure to suggest it.
 
 Profiles must have compatible orientation; a rectangle lofted to a circle is
 fine, but reversing one profile's winding produces a twisted, self-
