@@ -441,3 +441,58 @@ page): dirty a slider, click "← All parts," confirm the modal renders with
 real text and two buttons; click "Stay," confirm the editor view and the
 dirty slider value are unchanged; click "← All parts" again, click "Leave,"
 confirm it lands back on the home list.
+
+**"Leave" actually discards the changes, not just navigates away from
+them.** The warning text promises "your changes will not be saved" --
+the first cut of this only kept that promise by accident, because
+`localStorage["cadbench"]` (the seed `buildControls()` reads a part's
+sliders from) was being overwritten on every single `render()` call, i.e.
+on every slider tick, dirty or not. That meant there was never anything
+correct to revert TO: reopening a part after "Leave" showed the exact same
+un-handed values right back, because they'd already been cached as if they
+were legitimate. Fixed by narrowing what gets written there to only the two
+real hand-off moments:
+
+```js
+function saveHandoffSnapshot(p){
+  try{ const all=JSON.parse(localStorage.getItem("cadbench")||"{}");
+       all[KEY]=p; localStorage.setItem("cadbench", JSON.stringify(all)); }catch(e){}
+}
+function revertToLastHandoff(){
+  let saved=null;
+  try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}"))[KEY]; }catch(e){}
+  P().params.forEach(q=>{
+    if(isLocked(q)) return;
+    const v = saved && saved[q.id]!==undefined ? saved[q.id] : q.val;
+    el(q.id).value = v;
+  });
+  render();
+}
+```
+
+`saveHandoffSnapshot(vals())` is called from exactly two places -- the DB
+`send` handler's success branch, and the `copy` button's success branch --
+both already the moments that reset `DIRTY=false`, so "handed over" means
+the same thing to the snapshot as it already meant to the dirty flag.
+`revertToLastHandoff()` is called from `backHome`'s click handler, only
+when the part WAS dirty and the user chose "Leave":
+
+```js
+el("backHome").addEventListener("click", async ()=>{
+  const wasDirty = DIRTY;
+  if(!(await askLeaveConfirm())) return;
+  if(wasDirty) revertToLastHandoff();
+  DIRTY=false; VIEW='home'; showView();
+});
+```
+
+A part that has never been handed over reverts to its own coded default
+(`q.val`), not to some earlier arbitrary drag position -- there is no
+"before" to speak of until a hand-off actually happens once. Locked
+sliders are skipped: their value is never a user edit in the first place,
+so there is nothing on them to revert. Verified in a real browser: fake a
+prior hand-off by writing `{wallH:45}` into `localStorage["cadbench"]`
+directly, reopen the part and confirm the slider seeds at 45 (not the
+coded default), drag it to 30, click "← All parts" → "Leave," confirm it
+reads back 45; separately, drag to 33 and click "Stay," confirm it stays at
+33 and nothing was written to storage.

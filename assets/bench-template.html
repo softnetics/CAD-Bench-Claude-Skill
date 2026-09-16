@@ -600,8 +600,35 @@ function render(){
     .map(q=>q.u?`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])} * ${q.u};`
               :`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])};`).join("\n")
     + `\n// ${part.file}`;
+}
+
+// `cadbench` holds the values from the LAST successful hand-off (DB send
+// or Copy constants), one entry per part -- not a live draft. Written only
+// at those two moments (see their click handlers), never on every slider
+// tick, so it means the same thing buildControls() reads it as: "what
+// Claude actually has." A live-draft write here would defeat the leave
+// guard entirely -- reopening a part would always show the un-handed
+// changes back, so "Leave" would have nothing real to revert.
+function saveHandoffSnapshot(p){
   try{ const all=JSON.parse(localStorage.getItem("cadbench")||"{}");
        all[KEY]=p; localStorage.setItem("cadbench", JSON.stringify(all)); }catch(e){}
+}
+
+// Puts every unlocked slider back to the last hand-off snapshot (or the
+// part's own default, if this part has never been handed over) and
+// re-renders. Called when the user chooses "Leave" on a dirty part -- the
+// warning promises the changes "will not be saved," so leaving actually
+// discards them instead of just navigating away and leaving the dirty
+// values sitting in the DOM for next time.
+function revertToLastHandoff(){
+  let saved=null;
+  try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}"))[KEY]; }catch(e){}
+  P().params.forEach(q=>{
+    if(isLocked(q)) return;   // locked sliders are never a user edit to revert
+    const v = saved && saved[q.id]!==undefined ? saved[q.id] : q.val;
+    el(q.id).value = v;
+  });
+  render();
 }
 
 function say(t,c){ const m=el("msg"); m.textContent=t; m.className="msg "+(c||""); }
@@ -631,13 +658,18 @@ el("load").addEventListener("click",()=>{
 });
 el("copy").addEventListener("click",async()=>{
   const b=el("copy");
-  try{ await navigator.clipboard.writeText(el("consts").textContent); b.textContent="Copied"; DIRTY=false; }
+  try{
+    await navigator.clipboard.writeText(el("consts").textContent);
+    b.textContent="Copied"; saveHandoffSnapshot(vals()); DIRTY=false;
+  }
   catch(e){ b.textContent="Select and copy"; }
   setTimeout(()=>b.textContent="Copy parameters",1800);
 });
 
 el("backHome").addEventListener("click", async ()=>{
+  const wasDirty = DIRTY;
   if(!(await askLeaveConfirm())) return;
+  if(wasDirty) revertToLastHandoff();
   DIRTY=false; VIEW='home'; showView();
 });
 el("editBtn").addEventListener("click", ()=>{ VIEW='edit'; showView(); });
@@ -691,6 +723,7 @@ el("send").addEventListener("click", async () => {
       params: p, consts: el("consts").textContent,
       savedAt: new Date().toISOString()
     });
+    saveHandoffSnapshot(p);
     DIRTY = false;
     b.textContent = "Handed over";
   } catch (e) {
