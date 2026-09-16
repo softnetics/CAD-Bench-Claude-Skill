@@ -10,6 +10,9 @@ models/*.params.json
 # Scratch models/recipes created while testing scripts/new_part.py
 # (rename and commit intentionally-kept ones instead of leaving the default name)
 models/*.recipe.js
+# ...except the check_mesh_parity.py fixture pair -- a real, intentionally
+# committed reference the checker's own self-test runs against, not scratch.
+!models/_parity_demo.recipe.js
 
 # Python
 __pycache__/
@@ -20,6 +23,10 @@ __pycache__/
 .venv/
 venv/
 *-venv/
+
+# Node tooling (see package.json -- three.js/three-bvh-csg for
+# check_mesh_parity.py; `npm install` once, never checked in)
+node_modules/
 
 # OS cruft
 .DS_Store

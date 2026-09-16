@@ -61,6 +61,11 @@ On every later republish to the same URL, **omit `favicon`** and keep the
   cards:  d => [ ["Boss wall", d.boss_wall.toFixed(2)], /* ... */ ],
   checks(p, d) { /* returns [ [ok, label, detail], ... ] */ },
   draw(p, d) { /* returns an SVG string */ },
+  // mesh(p, THREE, CSG) { /* optional -- returns a THREE.BufferGeometry
+  //   for a live-rendered 3D preview instead of/alongside draw()'s flat
+  //   sketch. Only worth it for genuinely curved parts -- see the decision
+  //   checklist and the mesh() contract in references/live-mesh-preview.md
+  //   before adding one, and gate its publish on scripts/check_mesh_parity.py. */ },
 }
 ```
 

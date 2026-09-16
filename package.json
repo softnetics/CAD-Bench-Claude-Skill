@@ -1,0 +1,9 @@
+{
+  "name": "cad-bench-tooling",
+  "private": true,
+  "description": "Node-side tooling for cad-bench: headless mesh-parity checking between a bench recipe's live JS preview mesh and the real Python/OCCT STL export. Not a runtime dependency of any published artifact -- artifacts load three.js from a CDN at view time; this package.json is only for scripts/check_mesh_parity.js run during development.",
+  "devDependencies": {
+    "three": "^0.169.0",
+    "three-bvh-csg": "^0.0.17"
+  }
+}

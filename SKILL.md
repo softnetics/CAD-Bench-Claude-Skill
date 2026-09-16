@@ -189,6 +189,15 @@ overlapping each other, at every slider extreme, not just defaults. Field
 spec, the SVG helpers, and how to lay out more than one view without this
 happening are in `references/bench-artifact.md`.
 
+**A `draw()` sketch is the default, not the only option.** For a part whose
+shape is genuinely curved (a loft, a doubly-curved surface) a flat 2D sketch
+means reimplementing projection math by hand — verified error-prone (a
+bean-shaped visor's silhouette was traced wrong this way, from a real
+per-slice-boundary bug). `references/live-mesh-preview.md` has a decision
+checklist for when it's worth building a real live-rendered `mesh()`
+instead (three.js + three-bvh-csg, gated by `scripts/check_mesh_parity.py`)
+and when it isn't — most parts stay on the plain SVG sketch.
+
 Then hand the user the link: adjust sliders, and when the checks are green
 press **"Hand these to Claude"**.
 
