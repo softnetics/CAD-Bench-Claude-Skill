@@ -376,3 +376,36 @@ after adding this navigation and confirming the problem count didn't
 change, then a real click-through (home → preview → edit → back) in the
 browser pane to confirm the states themselves behave, since that's the one
 thing the headless checker cannot see.
+
+**Un-handed slider changes are guarded against being silently lost.** A
+`DIRTY` flag goes `true` on any slider drag, typed-numbox commit, or
+successful "Load into sliders" paste, and back to `false` only when a part
+is freshly opened, or values are actually handed off (via the DB
+hand-off, or "Copy constants" as the fallback). Every way to leave a
+dirty part -- the picker (switching to a DIFFERENT part; re-clicking the
+already-active tab is a no-op, not a "leave"), "← All parts", and closing
+the tab/window itself -- checks it first:
+
+```js
+function confirmLeaveIfDirty(){
+  if(!DIRTY) return true;
+  return confirm("You've changed sliders that haven't been handed to Claude "
+    +"yet. Leave without handing them over? Your changes will not be saved.");
+}
+```
+
+`window.addEventListener("beforeunload", ...)` (the real-tab-close case)
+needs an existence guard -- `if (typeof window.addEventListener ===
+"function")` -- because `check_bench.py`'s headless harness stubs `window`
+as a bare `{}` with no methods on it, unlike a real browser; without the
+guard the harness throws "window.addEventListener is not a function" and
+every part reports as failed, which is how this was actually caught before
+publishing, not by inspection.
+
+Verified with `javascript_tool`-style direct state inspection rather than
+trying to drive a real native `confirm()` dialog through browser automation
+(those are OS-level modals outside the DOM, unreliable to click through):
+stub `window.confirm` to return `false`, trigger a picker click, confirm
+`KEY`/`VIEW` did not change; stub it to return `true`, confirm they did and
+`DIRTY` reset for the newly-opened part; confirm re-clicking the active tab
+never calls `confirm()` at all.

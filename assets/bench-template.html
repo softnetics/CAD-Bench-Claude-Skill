@@ -410,13 +410,28 @@ let KEY = null;
 //   committing to editing it.
 // 'edit' -- the full experience: sliders, drawing, checks, hand-off panel.
 let VIEW = 'home';
+// True once a slider/numbox/paste has changed a value THIS PART hasn't
+// handed to Claude yet. Guards every way to leave that would lose it:
+// switching parts via the picker, going back to the home list, or closing
+// the tab. Cleared on opening a (possibly new) part and on a successful
+// hand-off -- never on a mere re-render, so setting a slider's .value
+// programmatically (buildControls()'s own initial population) does not
+// falsely arm the guard.
+let DIRTY = false;
+function confirmLeaveIfDirty(){
+  if(!DIRTY) return true;
+  return confirm("You've changed sliders that haven't been handed to Claude "
+    +"yet. Leave without handing them over? Your changes will not be saved.");
+}
 const el=id=>document.getElementById(id);
 const P=()=>PARTS[KEY];
 const vals=()=>{const o={}; P().params.forEach(q=>o[q.id]=parseFloat(el(q.id).value)); return o;};
 const fmt=(n,d=2)=>Number(n.toFixed(d)).toString();
 
 // ---- Home page: just names. Clicking one opens a read-only preview, not
-// straight into the sliders -- see openPart()/showView().
+// straight into the sliders -- see openPart()/showView(). Reaching the
+// home list at all means VIEW was already 'home' (editorArea hidden), so
+// there is no OTHER part's dirty sliders in play here -- nothing to guard.
 function buildHome(){
   el("home").innerHTML = Object.entries(PARTS).map(([k,v])=>
     `<button class="home-item" type="button" data-k="${k}">`
@@ -432,7 +447,7 @@ function buildHome(){
 // editor) -- one consistent rule for "how did I get here" instead of two
 // different entry behaviours depending on where the click came from.
 function openPart(k){
-  KEY=k; VIEW='preview';
+  KEY=k; VIEW='preview'; DIRTY=false;
   buildControls(); render(); buildPicker(); showView();
 }
 
@@ -456,6 +471,8 @@ function buildPicker(){
   el("picker").innerHTML = Object.entries(PARTS).map(([k,v])=>
     `<button data-k="${k}" aria-pressed="${k===KEY}">${v.label}</button>`).join("");
   el("picker").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+    if(b.dataset.k===KEY) return;         // re-clicking the active tab is a no-op, not a "leave"
+    if(!confirmLeaveIfDirty()) return;
     openPart(b.dataset.k);   // always lands on preview, same rule as the home list
   }));
 }
@@ -504,7 +521,7 @@ function buildControls(){
         `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"${locked?" disabled":""}></div>`;
     }).join("") + `</div>`).join("");
   P().params.forEach(q=>{
-    el(q.id).addEventListener("input", render);
+    el(q.id).addEventListener("input", ()=>{ DIRTY=true; render(); });
     const box=el("o_"+q.id);
     box.addEventListener("change", ()=>commitNumbox(q));
     box.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); box.blur(); } });
@@ -537,6 +554,7 @@ function commitNumbox(q){
     .toFixed(stepDecimals(q.step)));
   box.classList.toggle("clamped", Number.isFinite(raw) && Math.abs(snapped-raw)>1e-9);
   el(q.id).value=snapped;
+  DIRTY=true;
   render();
   setTimeout(()=>box.classList.remove("clamped"), 900);
 }
@@ -585,6 +603,7 @@ el("load").addEventListener("click",()=>{
     el(q.id).value=c;
     (c===n?ok:clamped).push(name+(c===n?"":" → "+c));
   }
+  if(ok.length || clamped.length) DIRTY=true;
   render();
   if(!ok.length && !clamped.length){
     say("None of those belong to "+P().label+".","err"); return; }
@@ -595,13 +614,29 @@ el("load").addEventListener("click",()=>{
 });
 el("copy").addEventListener("click",async()=>{
   const b=el("copy");
-  try{ await navigator.clipboard.writeText(el("consts").textContent); b.textContent="Copied"; }
+  try{ await navigator.clipboard.writeText(el("consts").textContent); b.textContent="Copied"; DIRTY=false; }
   catch(e){ b.textContent="Select and copy"; }
   setTimeout(()=>b.textContent="Copy parameters",1800);
 });
 
-el("backHome").addEventListener("click", ()=>{ VIEW='home'; showView(); });
+el("backHome").addEventListener("click", ()=>{
+  if(!confirmLeaveIfDirty()) return;
+  DIRTY=false; VIEW='home'; showView();
+});
 el("editBtn").addEventListener("click", ()=>{ VIEW='edit'; showView(); });
+
+// Closing the tab/window itself with un-handed changes -- the browser's
+// own native dialog (text is browser-controlled, cannot be customised),
+// as a complement to the custom confirm() above for in-app navigation.
+// Guarded: check_bench.py's headless harness stubs `window` as a bare {}
+// with no addEventListener, unlike a real browser.
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("beforeunload", (e)=>{
+    if(!DIRTY) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+}
 
 buildHome(); buildPicker(); showView();
 
@@ -639,6 +674,7 @@ el("send").addEventListener("click", async () => {
       params: p, consts: el("consts").textContent,
       savedAt: new Date().toISOString()
     });
+    DIRTY = false;
     b.textContent = "Handed over";
   } catch (e) {
     handedNote("Could not hand over (" + (e && e.code) + ") -- use Copy parameters.", "err");
