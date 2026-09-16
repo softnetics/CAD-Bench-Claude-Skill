@@ -183,11 +183,39 @@ against a 23.67mm-radius fixed sphere produced 21mm of depth from a 6.8mm
 directly from real per-slice measurements instead (per secs 1-4 above, but
 keeping each slice's actual centre, not just its span — a closed-form taper
 fit that assumes every slice shares one centre line can miss a real few-mm
-centre drift the mesh actually has) and treat the fixed sphere as a
-VALIDATION fact instead of a construction constraint: check how far the
-rebuilt part's own mating region sits from the fixed curvature, and gate on
-that, rather than forcing the geometry through it via boolean.
+centre drift the mesh actually has).
 
-On the bench page, whichever role the fixed constants play, they are
-read-only values baked into `derive()`, not `params` entries — there is
-nothing to put a slider on.
+**A single sampled point cannot validate a whole mating edge, and treating
+the fixed curvature as pure validation (nothing built against it) throws
+away a fix that's easy to build.** The first attempt at the solid-part case
+checked the fit at ONE point on the mating rim (its widest corner) and
+reported "1.78mm gap" — looked fine. Checking the whole rim at the same
+slider values told a different story: +1.78mm (floating away from the
+head) at the sides, -7.91mm (buried 7.9mm INSIDE the head) at the bottom,
+because a free Width/Length that scales the rim's X and Y independently
+doesn't distort it evenly against one fixed curvature, and a single corner
+can land on the one spot that still looks fine. The fix that actually
+closes this gap rather than just reporting it: extrude the (scaled) mating
+cross-section into a short FLANGE running back from the rim to the fixed
+sphere's own equator, union it onto the main body, then subtract the fixed
+sphere from the combination. This is a construction constraint again — but
+applied ONLY to the flange, not the whole part the way the box-clip
+approach wrongly was, so it doesn't reintroduce the inflated-dome failure.
+Wherever the rim already cleared the sphere this trims the flange down to
+the exact curvature (closing what was a floating gap); wherever the rim was
+buried, this removes the interference directly. The result touches the
+real curvature at EVERY point of the mating footprint, by construction —
+visible, too: at an aggressive resize this carves a real concave scoop
+where the rim would otherwise have punched into the neighbouring part.
+(Gotcha specific to this construction: stop the flange at the sphere's own
+EQUATOR, not further past it — a flange long enough to reach the sphere's
+FAR hemisphere gets cut into two disconnected solids when the sphere is
+subtracted, since the subtraction then removes a middle section rather than
+just trimming one end.)
+
+On the bench page, the fixed constants are read-only values baked into
+`derive()`, not `params` entries — there is nothing to put a slider on. A
+check that only reports a single sampled distance (`Math.hypot(...)` at one
+corner) is not sufficient evidence the whole mating surface fits — if the
+model's own `build()` doesn't force the fit by construction, the bench
+check needs to sample multiple points around the boundary, not just one.
