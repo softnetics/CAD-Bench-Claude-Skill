@@ -22,11 +22,24 @@ already does for the 2D checks) -- a mesh() that matches at defaults but
 diverges at an extreme is a real, previously-seen bug class (see the visor
 STL-segmentation session notes), not a hypothetical.
 
+BATCHED, not one process per case (see the module's own benchmark history):
+a first version spawned a fresh Node process (re-importing three.js) AND a
+fresh Python process (re-triggering build123d's font-scan workaround, ~1-2s
+each per brep.py's own docstring) for every single test case -- 9 cases
+took 36 seconds despite trivial output. This version runs exactly ONE Node
+process for every case (three.js/three-bvh-csg imported once, all cases
+looped inside) and ONE Python import of the model module (build123d loaded
+once via importlib, `build()` called directly per case, reading the exact
+OCCT volume/bounding box straight off the returned part -- no STL export,
+no trimesh reload, and a more correct reference number besides, since it's
+the kernel's own exact volume rather than a re-loaded tessellation of it).
+
 Requires `node` on PATH with `three` and `three-bvh-csg` installed
 (package.json in this skill's root -- `npm install` once).
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -68,19 +81,27 @@ function meshVolume(geometry) {{
   return Math.abs(vol);
 }}
 
-const p = {params_json};
-const geometry = mesh(p, THREE, CSG);
-geometry.computeBoundingBox();
-const bb = geometry.boundingBox;
-console.log(JSON.stringify({{
-  volume: meshVolume(geometry),
-  bbox: [[bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]],
-}}));
+// {{name: params}} for every test case, evaluated in ONE process so the
+// three.js/three-bvh-csg import cost (the dominant per-case cost measured
+// earlier) is paid once, not once per case.
+const cases = {cases_json};
+const out = {{}};
+for (const [name, p] of Object.entries(cases)) {{
+  const geometry = mesh(p, THREE, CSG);
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  out[name] = {{
+    volume: meshVolume(geometry),
+    bbox: [[bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]],
+  }};
+}}
+console.log(JSON.stringify(out));
 """
 
 
-def _run_js_mesh(recipe_path, params, node_cwd):
-    """Runs mesh(p, THREE, CSG) for one param set, returns {volume, bbox}."""
+def _run_js_mesh_batch(recipe_path, cases, node_cwd):
+    """Runs mesh(p, THREE, CSG) for every case in ONE node process. Returns
+    {name: {volume, bbox}}."""
     with open(recipe_path, encoding="utf-8") as fh:
         recipe_src = fh.read()
     # Strip the `export` keywords -- the harness inlines the recipe source
@@ -88,7 +109,8 @@ def _run_js_mesh(recipe_path, params, node_cwd):
     # `params` just need to exist as top-level bindings in the same file.
     recipe_src = re.sub(r"^export\s+", "", recipe_src, flags=re.MULTILINE)
 
-    script = MESH_HARNESS.format(recipe_src=recipe_src, params_json=json.dumps(params))
+    cases_json = json.dumps(dict(cases))
+    script = MESH_HARNESS.format(recipe_src=recipe_src, cases_json=cases_json)
     with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, dir=node_cwd) as fh:
         fh.write(script)
         tmp_path = fh.name
@@ -106,28 +128,26 @@ def _run_js_mesh(recipe_path, params, node_cwd):
     return json.loads(line[-1])
 
 
-def _run_python_model(model_path, python_exe, params):
-    """Writes a params.json override, runs the model, loads the exported
-    STL with trimesh, returns {volume, bbox}."""
-    import trimesh
+def _run_python_batch(model_path, cases):
+    """Imports the model module ONCE (build123d's own import/font-scan cost
+    paid a single time, not once per case) and calls build() directly for
+    every case, reading the kernel's own exact volume/bounding_box() --
+    no STL export, no trimesh reload. Returns {name: {volume, bbox}}."""
+    spec = importlib.util.spec_from_file_location("_cad_bench_parity_model", model_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
 
-    here = os.path.dirname(os.path.abspath(model_path))
-    stem = os.path.splitext(os.path.basename(model_path))[0]
-    params_path = os.path.join(here, f"{stem}.params.json")
-    stl_path = os.path.join(here, f"{stem}.stl")
-
-    with open(params_path, "w", encoding="utf-8") as fh:
-        json.dump(params, fh)
-    try:
-        proc = subprocess.run([python_exe, model_path], capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f"model failed:\n{proc.stdout}\n{proc.stderr}")
-        mesh = trimesh.load(stl_path)
-        return {"volume": float(mesh.volume),
-                "bbox": [mesh.bounds[0].tolist(), mesh.bounds[1].tolist()]}
-    finally:
-        if os.path.exists(params_path):
-            os.remove(params_path)
+    out = {}
+    for name, params in cases:
+        P = dict(mod.PARAMS)
+        P.update(params)
+        part = mod.build(P)
+        bb = part.bounding_box()
+        out[name] = {
+            "volume": float(part.volume),
+            "bbox": [[bb.min.X, bb.min.Y, bb.min.Z], [bb.max.X, bb.max.Y, bb.max.Z]],
+        }
+    return out
 
 
 def _compare(name, py, js):
@@ -159,8 +179,9 @@ def main():
     ap.add_argument("recipe", help="path to the JS recipe fixture "
                     "(exports `params` array and `mesh(p, THREE, CSG)`)")
     ap.add_argument("--python", default=sys.executable,
-                    help="python executable with build123d installed "
-                    "(default: the interpreter running this script)")
+                    help="unused when this script's own interpreter already has "
+                    "build123d installed (batched Python cases import the model "
+                    "directly rather than shelling out); kept for compatibility")
     args = ap.parse_args()
 
     with open(args.recipe, encoding="utf-8") as fh:
@@ -189,16 +210,15 @@ def main():
             case[q["id"]] = q[bound]
             cases.append((f"{q['id']}={q[bound]}", case))
 
+    try:
+        js_results = _run_js_mesh_batch(args.recipe, cases, node_cwd)
+        py_results = _run_python_batch(args.model, cases)
+    except Exception as e:
+        sys.exit(f"batch run failed: {e}")
+
     all_ok = True
-    for name, params in cases:
-        try:
-            js = _run_js_mesh(args.recipe, params, node_cwd)
-            py = _run_python_model(args.model, args.python, params)
-        except Exception as e:
-            print(f"FAIL {name}\n       ! {e}")
-            all_ok = False
-            continue
-        all_ok &= _compare(name, py, js)
+    for name, _ in cases:
+        all_ok &= _compare(name, py_results[name], js_results[name])
 
     print()
     print(f"{len(cases)} case(s), {'all parity-checked OK' if all_ok else 'PARITY MISMATCH FOUND'}")
