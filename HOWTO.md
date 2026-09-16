@@ -12,6 +12,9 @@ in a browser, not a mockup.
 [the checks](#4-a-row-of-checks-not-a-generic-linter) ·
 [handing values back](#5-hand-the-values-back-to-claude) ·
 [locked sliders](#6-some-sliders-are-locked-on-purpose) ·
+[several parts in one file](#7-if-the-stl-is-actually-several-parts-in-one-file) ·
+[mating to a real part](#8-when-the-new-part-has-to-mate-flush-against-something-real) ·
+[live 3D preview](#9-a-live-3d-preview-for-the-rare-part-that-needs-one) ·
 [what it won't do](#what-it-wont-do)
 
 ## 1. Ask for a part
@@ -33,6 +36,15 @@ mesh's own geometry (never by eyeballing a screenshot of it) with
 component (a motor shaft, a bearing) against that component's own spec, and
 builds a proper model from what it finds — see §6 below for what that looks
 like on the resulting bench page.
+
+That path has an honest limit: `inspect_stl.py` screens the mesh first, and
+a **sculpted or organic shape** (a character model, anything with
+continuously varying freeform curvature, no flat faces or constant-radius
+fillets to find) fails it. Claude says so and stops, rather than quietly
+handing back numbers measured off a mesh that was never built from
+primitives in the first place — this skill models mechanical parts, not
+sculptures. If the STL turns out to be **several parts glued into one
+file**, that's a different, solvable case — see §7.
 
 ## 2. Claude writes a parametric model, not a one-off shape
 
@@ -126,10 +138,69 @@ but a dimension that mates to a real component gets locked to that
 component's own spec rather than to whatever the loose STL happened to
 measure — full method in `references/stl-reverse-engineering.md`.
 
+## 7. If the STL is actually several parts in one file
+
+Sometimes "here's an STL" means a whole small assembly exported as one
+mesh — a body, a bracket, several pieces that only look like one part.
+Claude splits it by actual connectivity, not by guessing:
+
+```
+$ python scripts/segment_stl.py assembly.stl
+  4 disjoint components (by connectivity, not by name):
+  #0  volume=10445.09mm^3  bbox=[20. 20. 40.]  LARGEST
+  #1  volume=  419.29mm^3  bbox=[ 6.  6. 15.]  GROUND-CONTACT, PERIPHERAL, MIRROR-PAIR with #2
+  #2  volume=  419.29mm^3  bbox=[ 6.  6. 15.]  GROUND-CONTACT, PERIPHERAL, MIRROR-PAIR with #1
+  #3  volume=   90.00mm^3  bbox=[10.  1.5   6.]  THIN-SHELL
+```
+
+Notice what it does **not** say: it never claims "#1 is a leg" or "#3 is a
+bracket." It reports what's actually measurable — which piece is biggest,
+which two are a genuine mirror pair (checked geometrically, by reflecting
+one against the other, not just "similar size"), which piece touches the
+ground, which is a thin shell rather than a solid lump. A part's print
+orientation (which side happened to face the print bed) has nothing to do
+with which way is "up" for the object itself, so guessing a real name from
+position alone is a coin flip — naming each piece, and deciding which (if
+any) to drop, is left to you. `--export-parts` writes each one to its own
+STL so you can open and eyeball them before anything gets deleted.
+
+## 8. When the new part has to mate flush against something real
+
+If the piece being designed has to sit flush against one of those
+segmented parts — a replacement piece that clips onto a body, a bracket
+that seats against a housing — the surface where they touch isn't a free
+design choice. Claude fits it directly: classifies which faces of the
+existing part actually face the neighbour, then tightens that
+classification until a primitive (usually a sphere or a cylinder) fits
+cleanly. That fitted curvature becomes a **fixed fact** in the new model,
+not a slider — you can resize the new part all you want, but the surface
+that has to touch the real thing stays locked to what the real thing
+actually measures. (Whether that fact becomes a hard boolean constraint or
+a softer validation check depends on whether the neighbouring part is
+hollow or solid inside — a detail Claude works out and states, not
+something you need to track yourself.)
+
+## 9. A live 3D preview, for the rare part that needs one
+
+Most bench pages show a flat 2D sketch — a top view, a section — redrawn
+live as sliders move. That's the default because it's cheap and exact for
+anything prismatic. A small minority of parts (something with a real,
+doubly-curved surface — a dome, a lofted shell) can instead get a rendered
+3D preview that rotates and updates live, built the same way a video game
+renders a shape rather than by computing a 2D outline formula by hand.
+Claude decides which a part gets using a short checklist, not by default —
+most parts, including almost everything mechanical, stay on the plain
+sketch. If a part does get the 3D version, it's checked against the real
+exported model automatically before publishing, the same way every other
+check on this page is: silently and continuously, not something you have
+to ask for.
+
 ## What it won't do
 
-Assemblies with mates, thread modelling, sheet-metal unfolding, FEA, or
-output formats other than STL/STEP. If a request needs one of those, the
+Assemblies with mates, thread modelling, sheet-metal unfolding, FEA,
+sculpted/organic shapes (see §1 — no feature tree to recover from a
+character model or anything with continuously varying freeform curvature),
+or output formats other than STL/STEP. If a request needs one of those, the
 skill says so rather than quietly handing back something that looks right
 and isn't.
 
@@ -139,3 +210,8 @@ If you're editing `SKILL.md`, the models, or the bench template rather than
 just using them: `references/verification.md` has the sliver-checking
 method and the fudge-factor-tuning discipline this skill's own development
 needed the hard way — worth reading before touching a boolean-heavy model.
+`references/live-mesh-preview.md` has the checklist for when a part earns a
+live 3D preview (rare) versus the plain 2D sketch (the default, correct
+choice for almost everything) — and `scripts/check_mesh_parity.py`'s own
+test fixture (`models/_parity_demo.*`) is a small, complete worked example
+if you're adding one.
