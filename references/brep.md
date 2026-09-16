@@ -24,6 +24,7 @@ B.export_verified(part, "part.stl", "part")
 6. Builder mode vs algebra mode
 7. Fitting a curved face against a cylinder — inside vs outside
 8. A rotation or mirror's sign is not obvious by inspection — check it
+9. A sphere's own pole/seam can land exactly on your cut plane
 
 ---
 
@@ -353,3 +354,38 @@ compare by hand before it goes into `build()` for real. This costs a few
 seconds per check and catches a class of bug that otherwise only shows up
 after printing the part (or, worse, after being told by someone else that
 the part is backwards).
+
+## 9. A sphere's own pole/seam can land exactly on your cut plane
+
+`Sphere(r) & Box(...)` (or any boolean that slices a sphere along a plane
+through its centre) can tessellate as **"not watertight" regardless of
+tessellation tolerance** — confirmed by sweeping `tolerance`/`angular_tolerance`
+from 0.001 to 0.1 and finding the same handful of degenerate zero-length
+edges every time, then confirming the bare `sphere & box` (before any
+subtraction) already fails identically. This isolates the cause to the
+sphere's own UV pole or seam, not the boolean combination or the mesh
+deflection settings: an *unrotated* `Sphere()`'s pole sits at a specific,
+predictable point (straight up its local Z from centre) and its
+parametrization seam is a specific meridian line — and a symmetric clipping
+box, or a footprint centred on the sphere's own axis, has an unpleasant habit
+of cutting exactly through one or both.
+
+**Fix: rotate the sphere off the world axes before positioning it, not
+after.** A sphere is rotationally symmetric, so this changes nothing about
+the real geometry — only where OCCT's internal pole/seam happen to sit —
+but it reliably moves both off of wherever the boolean is cutting:
+
+```python
+def _sphere_at(radius, cx, cy, cz):
+    tilted = B.Sphere(radius).rotate(B.Axis.X, 23).rotate(B.Axis.Y, 17)
+    return B.Pos(cx, cy, cz) * tilted
+```
+
+The exact angles don't matter (23°/17° are arbitrary, chosen only to not be
+a multiple of 90° or of each other) — what matters is that the rotation
+happens on the un-positioned, un-clipped sphere, before it is moved to its
+final centre or intersected with anything. Diagnosing this from the
+export failure alone is slow; the fast path is checking `bare_sphere &
+your_clip_shape` in isolation the moment a boolean involving a sphere (or
+any full closed-surface revolve) reports "not watertight" with no other
+symptom.
