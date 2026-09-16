@@ -43,7 +43,7 @@ On every later republish to the same URL, **omit `favicon`** and keep the
 
 ```js
 "boss-plate": {
-  label: "Boss plate",                    // picker button text
+  label: "Boss plate",                    // home-list item name
   file:  "models/boss_plate.py",          // shown on the page; the model it pairs with
   note:  "Why the dimensions are what they are — the reasoning a reviewer needs.",
   params: [
@@ -340,9 +340,9 @@ Three states, one function each:
 let KEY = null;         // no part selected until one is opened
 let VIEW = 'home';      // 'home' | 'preview' | 'edit'
 
-function openPart(k){   // called from BOTH the home list and the picker --
-  KEY=k; VIEW='preview'; // one rule for "how did I get here": always preview,
-  buildControls(); render(); buildPicker(); showView();  // never straight to edit
+function openPart(k){   // called ONLY from the home list -- there is no
+  KEY=k; VIEW='preview'; // in-editor part switcher, so this is the one
+  buildControls(); render(); showView();  // way in, and always to preview
 }
 
 function showView(){
@@ -359,12 +359,15 @@ function showView(){
 }
 ```
 
-**The picker (the row of part-name tabs shown once you're past the home
-page) always lands on PREVIEW too, even when switching from inside an
-active edit session** -- one consistent rule rather than "home click goes
-to preview, picker click goes straight to edit." If that's ever
-inconvenient enough to change, change it in `openPart()` alone; nothing
-else needs to know which state a click came from.
+**There is no in-editor part-picker.** An earlier revision had a row of
+part-name tabs above the sliders so you could jump straight from one part's
+editor to another's preview. The user found that row confusing on a page
+that also has a "← All parts" button right next to it -- two different
+controls both claiming to be "the way to another part." Removed entirely:
+`openPart()` is now only ever called from the home list, and the editor
+view shows nothing but "← All parts" plus the current part's file name.
+Getting to a different part always means going back to the home list
+first -- one path, not two.
 
 **This costs nothing at the `check_bench.py` / model-parity level.** The
 headless checker evaluates `PARTS[key].derive/checks/draw` directly against
@@ -381,31 +384,60 @@ thing the headless checker cannot see.
 `DIRTY` flag goes `true` on any slider drag, typed-numbox commit, or
 successful "Load into sliders" paste, and back to `false` only when a part
 is freshly opened, or values are actually handed off (via the DB
-hand-off, or "Copy constants" as the fallback). Every way to leave a
-dirty part -- the picker (switching to a DIFFERENT part; re-clicking the
-already-active tab is a no-op, not a "leave"), "← All parts", and closing
-the tab/window itself -- checks it first:
+hand-off, or "Copy constants" as the fallback). The only way left to leave
+a dirty part without going through a hand-off is "← All parts" (plus
+closing the tab/window itself), and it checks first:
 
 ```js
-function confirmLeaveIfDirty(){
-  if(!DIRTY) return true;
-  return confirm("You've changed sliders that haven't been handed to Claude "
-    +"yet. Leave without handing them over? Your changes will not be saved.");
+function askLeaveConfirm(){
+  if(!DIRTY) return Promise.resolve(true);
+  return new Promise(resolve=>{
+    el("leaveModal").hidden=false;
+    const cleanup=(v)=>{
+      el("leaveModal").hidden=true;
+      el("leaveModalConfirm").removeEventListener("click",onYes);
+      el("leaveModalCancel").removeEventListener("click",onNo);
+      resolve(v);
+    };
+    const onYes=()=>cleanup(true), onNo=()=>cleanup(false);
+    el("leaveModalConfirm").addEventListener("click",onYes);
+    el("leaveModalCancel").addEventListener("click",onNo);
+  });
 }
 ```
 
+**This is an in-page modal, not a native `confirm()`, and that is load-
+bearing, not stylistic.** The first cut of this feature used a plain
+`confirm()` call and shipped with `check_bench.py` green -- but on the real
+published Artifact it produced no dialog at all: an Artifact renders in a
+sandboxed iframe, and `window.confirm()`/`alert()`/`prompt()` are silently
+no-ops there (no dialog, no thrown error, `confirm()` just returns
+immediately) rather than failing loudly. The user reported it as "there is
+no pop-up," not as an error, which is exactly what that failure mode looks
+like from the outside. Fix: a `.modal-overlay`/`.modal-box` pair already in
+the page's own DOM, shown/hidden via the `hidden` attribute, with
+`askLeaveConfirm()` returning a `Promise<boolean>` that resolves when
+"Stay" or "Leave" is clicked -- so callers (`backHome`'s click handler) are
+`async` and `await` it instead of branching on a synchronous return value.
+**If you ever add another place that needs this guard, await
+`askLeaveConfirm()`; do not reach for `confirm()` again, on this page or
+any future bench page** -- it will look correct in `check_bench.py` and in
+a plain local `file://` open, and then do nothing at all once published.
+
 `window.addEventListener("beforeunload", ...)` (the real-tab-close case)
-needs an existence guard -- `if (typeof window.addEventListener ===
-"function")` -- because `check_bench.py`'s headless harness stubs `window`
-as a bare `{}` with no methods on it, unlike a real browser; without the
+still uses the native event -- there's no DOM alternative for that one --
+and needs an existence guard: `if (typeof window.addEventListener ===
+"function")`, because `check_bench.py`'s headless harness stubs `window` as
+a bare `{}` with no methods on it, unlike a real browser; without the
 guard the harness throws "window.addEventListener is not a function" and
 every part reports as failed, which is how this was actually caught before
 publishing, not by inspection.
 
-Verified with `javascript_tool`-style direct state inspection rather than
-trying to drive a real native `confirm()` dialog through browser automation
-(those are OS-level modals outside the DOM, unreliable to click through):
-stub `window.confirm` to return `false`, trigger a picker click, confirm
-`KEY`/`VIEW` did not change; stub it to return `true`, confirm they did and
-`DIRTY` reset for the newly-opened part; confirm re-clicking the active tab
-never calls `confirm()` at all.
+Verified in a real browser (a native `confirm()` cannot be driven through
+browser automation, so the earlier version of this guard could only ever
+be checked by direct state stubbing -- the sandboxed-iframe failure above
+was invisible to that method and only showed up on the real published
+page): dirty a slider, click "← All parts," confirm the modal renders with
+real text and two buttons; click "Stay," confirm the editor view and the
+dirty slider value are unchanged; click "← All parts" again, click "Leave,"
+confirm it lands back on the home list.

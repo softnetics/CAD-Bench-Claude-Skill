@@ -30,12 +30,6 @@
          border-bottom:1px solid var(--rule);padding-bottom:16px}
   h1{margin:0;font-size:23px;font-weight:500;letter-spacing:-.01em;text-wrap:balance}
   .sub{margin:0;color:var(--ink-2);font-size:14px;max-width:66ch}
-  .picker{display:flex;gap:0;border:1px solid var(--rule);border-radius:6px;
-          overflow:hidden;width:fit-content;max-width:100%;flex-wrap:wrap}
-  .picker button{margin:0;border:0;border-right:1px solid var(--rule);border-radius:0;
-                 padding:9px 16px;background:var(--panel);color:var(--ink-2);font-size:13px}
-  .picker button:last-child{border-right:0}
-  .picker button[aria-pressed="true"]{background:var(--part-line);color:#fff}
   .file{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;color:var(--ink-2)}
   .cols{display:grid;grid-template-columns:340px 1fr;gap:24px;align-items:start}
   @media (max-width:860px){.cols{grid-template-columns:1fr}}
@@ -123,6 +117,18 @@
   .backbar button{margin:0}
   .cols.preview-mode{grid-template-columns:1fr}
   .previewbar{display:flex;justify-content:flex-end}
+
+  /* ---- Leave-without-saving modal -- native confirm()/alert() are
+     silently blocked inside the sandboxed iframe an Artifact renders in,
+     so this in-page dialog stands in for it. See askLeaveConfirm(). */
+  .modal-overlay{position:fixed;inset:0;background:rgba(20,20,19,.45);
+                 display:flex;align-items:center;justify-content:center;
+                 z-index:100;padding:16px}
+  .modal-box{background:var(--panel);border:1px solid var(--rule);
+             border-radius:8px;padding:20px;max-width:420px;
+             box-shadow:0 8px 24px rgba(0,0,0,.18)}
+  .modal-box p{margin:0 0 14px;font-size:13.5px;line-height:1.5}
+  .modal-box .row-btn{margin-top:0;justify-content:flex-end}
 </style>
 
 <div class="wrap">
@@ -138,8 +144,6 @@
       <button id="backHome" type="button">&larr; All parts</button>
       <span class="file" id="editorFile"></span>
     </div>
-
-    <div class="picker" id="picker"></div>
 
     <div class="cols" id="cols">
       <div id="controls"></div>
@@ -174,6 +178,16 @@
     </div>
 
     <footer id="note"></footer>
+  </div>
+
+  <div class="modal-overlay" id="leaveModal" hidden>
+    <div class="modal-box">
+      <p>You've changed sliders that haven't been handed to Claude yet. Leave without handing them over? Your changes will not be saved.</p>
+      <div class="row-btn">
+        <button id="leaveModalCancel" type="button">Stay</button>
+        <button id="leaveModalConfirm" class="primary" type="button">Leave</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -412,16 +426,30 @@ let KEY = null;
 let VIEW = 'home';
 // True once a slider/numbox/paste has changed a value THIS PART hasn't
 // handed to Claude yet. Guards every way to leave that would lose it:
-// switching parts via the picker, going back to the home list, or closing
-// the tab. Cleared on opening a (possibly new) part and on a successful
-// hand-off -- never on a mere re-render, so setting a slider's .value
-// programmatically (buildControls()'s own initial population) does not
-// falsely arm the guard.
+// going back to the home list, or closing the tab. Cleared on opening a
+// (possibly new) part and on a successful hand-off -- never on a mere
+// re-render, so setting a slider's .value programmatically
+// (buildControls()'s own initial population) does not falsely arm the guard.
 let DIRTY = false;
-function confirmLeaveIfDirty(){
-  if(!DIRTY) return true;
-  return confirm("You've changed sliders that haven't been handed to Claude "
-    +"yet. Leave without handing them over? Your changes will not be saved.");
+// A real native confirm() is silently blocked inside the sandboxed iframe
+// an Artifact renders in -- calling it neither shows a dialog nor throws,
+// it just returns undefined immediately, which read as "no pop-up at all"
+// rather than an error. This in-page modal replaces it; resolves true/false
+// the same way confirm() would once a button is clicked.
+function askLeaveConfirm(){
+  if(!DIRTY) return Promise.resolve(true);
+  return new Promise(resolve=>{
+    el("leaveModal").hidden=false;
+    const cleanup=(v)=>{
+      el("leaveModal").hidden=true;
+      el("leaveModalConfirm").removeEventListener("click",onYes);
+      el("leaveModalCancel").removeEventListener("click",onNo);
+      resolve(v);
+    };
+    const onYes=()=>cleanup(true), onNo=()=>cleanup(false);
+    el("leaveModalConfirm").addEventListener("click",onYes);
+    el("leaveModalCancel").addEventListener("click",onNo);
+  });
 }
 const el=id=>document.getElementById(id);
 const P=()=>PARTS[KEY];
@@ -442,13 +470,12 @@ function buildHome(){
     b.addEventListener("click",()=>openPart(b.dataset.k)));
 }
 
-// Opens a part straight into PREVIEW (never straight into edit, whether
-// reached from the home list or from the picker while already inside the
-// editor) -- one consistent rule for "how did I get here" instead of two
-// different entry behaviours depending on where the click came from.
+// Opens a part straight into PREVIEW, never straight into edit -- the only
+// way in is the home list now (the in-editor part-picker was removed so
+// "All parts" is the sole way back out, and the sole way to another part).
 function openPart(k){
   KEY=k; VIEW='preview'; DIRTY=false;
-  buildControls(); render(); buildPicker(); showView();
+  buildControls(); render(); showView();
 }
 
 // Shows/hides whole regions for the current VIEW. Cheap and total (no
@@ -465,16 +492,6 @@ function showView(){
   el("ioPanel").hidden = isPreview;
   el("previewActions").hidden = !isPreview;
   el("editorFile").textContent = P().file;
-}
-
-function buildPicker(){
-  el("picker").innerHTML = Object.entries(PARTS).map(([k,v])=>
-    `<button data-k="${k}" aria-pressed="${k===KEY}">${v.label}</button>`).join("");
-  el("picker").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
-    if(b.dataset.k===KEY) return;         // re-clicking the active tab is a no-op, not a "leave"
-    if(!confirmLeaveIfDirty()) return;
-    openPart(b.dataset.k);   // always lands on preview, same rule as the home list
-  }));
 }
 
 // ---- Lockable sliders (params with `locked:true` -- a value fixed by an
@@ -619,8 +636,8 @@ el("copy").addEventListener("click",async()=>{
   setTimeout(()=>b.textContent="Copy parameters",1800);
 });
 
-el("backHome").addEventListener("click", ()=>{
-  if(!confirmLeaveIfDirty()) return;
+el("backHome").addEventListener("click", async ()=>{
+  if(!(await askLeaveConfirm())) return;
   DIRTY=false; VIEW='home'; showView();
 });
 el("editBtn").addEventListener("click", ()=>{ VIEW='edit'; showView(); });
@@ -638,7 +655,7 @@ if (typeof window.addEventListener === "function") {
   });
 }
 
-buildHome(); buildPicker(); showView();
+buildHome(); showView();
 
 // ---- Handover ------------------------------------------------------
 // The sliders live in this browser and never reach Claude on their own.
