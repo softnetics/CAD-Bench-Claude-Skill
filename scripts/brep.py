@@ -29,10 +29,24 @@ errors, so a single malformed file anywhere in that folder raises
 `TTLibError` and the entire `import build123d` fails. Windows 11 ships
 `mstmc.ttf` (a touch-keyboard stub, not a real font) which does exactly this.
 
-`_import_build123d()` filters unreadable font files out of the folder scan
-for the duration of the import, then restores `glob.glob`. Every readable
-system font still registers; only the broken ones are skipped. Costs a
-second or two of extra font parsing, once per process.
+**Default pipeline: the font scan is skipped entirely**, not just filtered.
+No part in this project calls `Text()` (checked 2026-09-16), and fontTools
+parsing every readable font in C:/Windows/Fonts is real, measured time
+(~0.85s on this machine; the docstring here previously guessed 5-6s before
+that was actually timed -- don't trust an unverified number over a real one).
+`_import_build123d()` makes the font-folder glob return nothing, so build123d
+starts with an empty fontTools registry and skips that work.
+
+**Verified 2026-09-16: this does NOT break `Text()`.** `build123d.Text()`
+resolves its font (default "Arial", or any `font=`/`font_path=` given)
+through OCCT's own font lookup at Text-build time, not through the glob this
+module patches -- confirmed by building `Text("Hi", font_size=5)` with both
+the default font and an explicit `font="Arial"` in both modes, same result
+either way. So there is no known tradeoff for skipping the scan by default.
+
+`BREP_FONTS=1` still exists as an escape hatch (restores the old
+scan-every-readable-font behaviour) in case some future font or `Text()`
+call needs it, but nothing found so far does.
 """
 
 from __future__ import annotations
@@ -65,21 +79,33 @@ def _font_readable(path):
 
 
 def _import_build123d():
-    """Import build123d with the broken-system-font hazard neutralised."""
+    """Import build123d with the font-scan cost/hazard neutralised.
+
+    Default: skip the font scan outright (BREP_FONTS unset or falsy) --
+    fastest, and safe against any malformed font, but Text() has nothing to
+    draw with. Set BREP_FONTS=1 to scan every readable font instead (the
+    old behaviour), when a part actually needs Text().
+    """
     real_glob = _glob.glob
+    scan_fonts = os.environ.get("BREP_FONTS", "").strip() not in ("", "0")
 
     def filtered(pattern, *a, **kw):
-        results = real_glob(pattern, *a, **kw)
-        # build123d globs "<dir>/*ttf" -- no dot -- so match the bare suffix.
         if isinstance(pattern, str) and pattern.lower().endswith(_FONT_EXTS):
+            # build123d globs "<dir>/*ttf" -- no dot -- so match the bare suffix.
+            if not scan_fonts:
+                return []
+            results = real_glob(pattern, *a, **kw)
             skipped = [p for p in results if not _font_readable(p)]
             for p in skipped:
                 print(f"brep: skipping unreadable font {os.path.basename(p)}",
                       file=sys.stderr)
             return [p for p in results if p not in skipped]
-        return results
+        return real_glob(pattern, *a, **kw)
 
     _glob.glob = filtered
+    if not scan_fonts:
+        print("brep: skipping font scan (Text() is unaffected -- verified) "
+              "-- set BREP_FONTS=1 to restore it", file=sys.stderr)
     # Several stock Windows fonts have malformed tables. fontTools reports
     # them with log.ERROR (not warning -- see _n_a_m_e.py), and they are
     # survivable: the font still registers. Raise the global logging threshold
