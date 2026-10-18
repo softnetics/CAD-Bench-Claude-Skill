@@ -1,4 +1,5 @@
 """Confirmed rules: parse, bind roles, carry sizes, check, scopes."""
+import datetime
 import textwrap
 
 import pytest
@@ -240,9 +241,11 @@ def test_a_date_or_true_confirms_a_file(proj, value):
     asm.use_rules("wheel hub", wheel="wheel", shaft="motor")
     asm.rule("wheel.w = 9", confirmed=True)
     asm.rule("wheel.tyre_d = 50", confirmed="2026-10-18")
+    asm.rule("wheel.hub_len = 11", confirmed=datetime.date(2026, 10, 18))
     s = asm.solve()
     assert asm.instances["wheel"].P["bore_d"] == pytest.approx(3.1)
     assert asm.instances["wheel"].P["w"] == 9 and asm.instances["wheel"].P["tyre_d"] == 50
+    assert asm.instances["wheel"].P["hub_len"] == 11
     assert s.rules_ignored == 0 and not [w for w in s.warnings if "confirmed" in w]
 
 

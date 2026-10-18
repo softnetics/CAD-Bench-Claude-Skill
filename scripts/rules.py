@@ -81,7 +81,7 @@ _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 def is_confirmed(value):
     """True for an ISO date (YYYY-MM-DD) or literal true; anything else is unconfirmed."""
-    if value is True:
+    if value is True or isinstance(value, datetime.date):
         return True
     if not isinstance(value, str):
         return False
