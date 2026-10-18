@@ -223,6 +223,24 @@ def test_hard_coded_connector_flagged_but_anchor_is_not(parts):
     assert "a.stuck" in w[0] and "x stays at 15" in w[0]
 
 
+def test_part_origin_counts_as_an_anchor(parts):
+    # bbox is lopsided (a stub on +x) so x = 0 is not a bbox landmark, but it
+    # is the part's own origin: a deliberate datum, not a typed-in number
+    (parts / "stub.py").write_text(textwrap.dedent('''
+        import brep as B
+        import assembly as A
+        PARAMS = {"x": 40.0, "stub": 10.0}
+        def derive(P): return dict(P)
+        def build(P):
+            return B.Box(P["x"], 20, 10) + B.Pos(P["x"] / 2, 0, 0) * B.Box(
+                P["stub"], 4, 4, align=(B.Align.MIN, B.Align.CENTER, B.Align.CENTER))
+        def connectors(P): return {"mount": A.frame((0, 0, 5), z=(0, 0, 1))}
+    '''))
+    asm = make(parts)
+    asm.add("s", part="stub")
+    assert asm.solve().warnings == []
+
+
 def test_imported_part_skips_hard_coded_check(parts, tmp_path):
     import brep as B
     step = tmp_path / "blk.step"

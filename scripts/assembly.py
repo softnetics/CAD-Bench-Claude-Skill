@@ -479,7 +479,8 @@ def _snapshot(model, P):
 
 
 def _landmark(c, lo, hi):
-    for i, v in enumerate((lo, (lo + hi) / 2, hi)):
+    """Which datum a coordinate sits on: the part origin, bbox min, centre, max."""
+    for i, v in enumerate((0.0, lo, (lo + hi) / 2, hi)):
         if abs(c - v) <= LANDMARK_TOL:
             return i
     return None

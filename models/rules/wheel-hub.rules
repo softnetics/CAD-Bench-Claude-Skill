@@ -1,0 +1,7 @@
+# Example rule file for models/balance_bot.py. Plain text, one kind of part per file.
+kind: wheel hub
+purpose: A wheel pressed straight onto a motor shaft; it carries the robot's weight and the motor's torque.
+roles: wheel, shaft
+confirmed: 2026-10-18
+rule: wheel.bore_d = shaft.shaft_d + 0.1      # printed holes come out about 0.1 small, so this presses on
+rule: wheel.hub_len >= 1.5 * shaft.shaft_d    # enough hub length to grip the shaft

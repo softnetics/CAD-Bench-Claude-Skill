@@ -3,7 +3,10 @@
 Two panels (iso, top), each part flat-shaded in its own colour, every
 connector drawn as an axis triad (x red, y green, z blue) with its name.
 Tessellated meshes and markers share one orthographic camera, so a marker is
-exactly where the connector is. Pillow only; rendered at 2x and downsampled.
+exactly where the connector is. Meshes go through a small numpy depth buffer
+(sorting whole triangles fails on big flat faces); markers are drawn on top.
+Connectors at one point share a label ("a.x = b.y"). Pillow + numpy only;
+rendered at 2x and downsampled.
 """
 from __future__ import annotations
 
@@ -34,19 +37,47 @@ def _meshes(solved):
 
 
 def _markers(solved, length):
+    """One marker per connector; connectors at the same point share one label."""
     out = []
     for name, inst in solved.instances.items():
         for cn, f in inst.connectors.items():
             W = solved.placement(name) @ f.matrix()
-            out.append((f"{name}.{cn}", W[:3, 3], [W[:3, k] * length for k in range(3)]))
+            o = W[:3, 3]
+            twin = next((m for m in out if np.linalg.norm(m[1] - o) < 1e-3), None)
+            label = f"{name}.{cn}"
+            if twin is not None:
+                twin[0] = f"{twin[0]} = {label}"
+                label = ""
+            out.append([label, o, [W[:3, k] * length for k in range(3)]])
     return out
+
+
+def _raster(zbuf, rgb, xs, ys, zs, color):
+    """Fill one triangle into the depth buffer (larger z is nearer)."""
+    h, w = zbuf.shape
+    x0, x1 = max(int(np.floor(xs.min())), 0), min(int(np.ceil(xs.max())), w - 1)
+    y0, y1 = max(int(np.floor(ys.min())), 0), min(int(np.ceil(ys.max())), h - 1)
+    if x0 > x1 or y0 > y1:
+        return
+    px, py = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+    (ax, bx, cx), (ay, by, cy) = xs, ys
+    area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+    if abs(area) < 1e-12:
+        return
+    w0 = ((bx - px) * (cy - py) - (cx - px) * (by - py)) / area
+    w1 = ((cx - px) * (ay - py) - (ax - px) * (cy - py)) / area
+    w2 = 1.0 - w0 - w1
+    inside = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
+    z = w0 * zs[0] + w1 * zs[1] + w2 * zs[2]
+    win = zbuf[y0:y1 + 1, x0:x1 + 1]
+    hit = inside & (z > win)
+    win[hit] = z[hit]
+    rgb[y0:y1 + 1, x0:x1 + 1][hit] = color
 
 
 def _panel(meshes, markers, view, size, font):
     right, upv, v = _camera(*VIEWS[view])
     w, h = size
-    img = Image.new("RGB", size, (250, 250, 250))
-    dr = ImageDraw.Draw(img)
 
     pts = [V for _, V, _, _ in meshes] + [np.array([o + a for a in ax] + [o])
                                           for _, o, ax in markers]
@@ -62,7 +93,8 @@ def _panel(meshes, markers, view, size, font):
 
     light = v + np.array([0.3, 0.2, 0.6])
     light /= np.linalg.norm(light)
-    polys = []
+    zbuf = np.full((h, w), -np.inf)
+    rgb = np.full((h, w, 3), 250.0)
     for _, V, T, color in meshes:
         tri = V[T]
         n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
@@ -70,15 +102,16 @@ def _panel(meshes, markers, view, size, font):
         keep = nn > 1e-12
         n[keep] /= nn[keep, None]
         shade = 0.35 + 0.65 * np.abs(n @ light)
-        depth = tri.mean(axis=1) @ v
+        sx = w / 2 + (tri @ right - cu) * scale
+        sy = h / 2 - (tri @ upv - ct) * scale
+        sz = tri @ v
         base = np.array(color) * 255
         for k in np.nonzero(keep)[0]:
-            c = tuple(int(x) for x in np.clip(base * shade[k] + 25, 0, 255))
-            polys.append((depth[k], [proj(p) for p in tri[k]], c))
-    polys.sort(key=lambda x: x[0])
-    for _, poly, c in polys:
-        dr.polygon(poly, fill=c, outline=c)
+            _raster(zbuf, rgb, sx[k], sy[k], sz[k], np.clip(base * shade[k] + 25, 0, 255))
+    img = Image.fromarray(rgb.astype(np.uint8))
+    dr = ImageDraw.Draw(img)
 
+    placed = []
     for label, o, axes in markers:
         po = proj(o)
         for k, a in enumerate(axes):
@@ -89,9 +122,25 @@ def _panel(meshes, markers, view, size, font):
             dr.line([po, proj(o + a)], fill=AXIS_RGB[k], width=2 * SS)
         dr.ellipse([po[0] - 2 * SS, po[1] - 2 * SS, po[0] + 2 * SS, po[1] + 2 * SS],
                    fill=(0, 0, 0))
-        dr.text((po[0] + 4 * SS, po[1] + 2 * SS), label, fill=(20, 20, 20), font=font)
+        if label:
+            _label(dr, placed, po, label, font, w)
     dr.text((10 * SS, 8 * SS), view, fill=(90, 90, 90), font=font)
     return img
+
+
+def _label(dr, placed, po, text, font, width):
+    """Draw `text` near `po`, stepping down past labels already placed."""
+    l, t, r, b = dr.textbbox((0, 0), text, font=font)
+    tw, th = r - l, b - t + 3 * SS
+    x = po[0] + 4 * SS
+    if x + tw > width - 4 * SS:
+        x = max(po[0] - 4 * SS - tw, 2 * SS)
+    y = po[1] + 2 * SS
+    while any(x < bx + bw and bx < x + tw and y < by + bh and by < y + th
+              for bx, by, bw, bh in placed):
+        y += th
+    placed.append((x, y, tw, th))
+    dr.text((x, y), text, fill=(20, 20, 20), font=font)
 
 
 def _font(px):

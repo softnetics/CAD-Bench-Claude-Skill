@@ -148,6 +148,47 @@ real Python/OCCT model (volume + bounding box, at every slider extreme),
 because a live preview that quietly stops matching the real geometry is
 worse than no live preview at all.
 
+## Assemblies
+
+Join parts into a machine without typing a single world coordinate. Each
+part names its connection points (computed from its own dimensions, so a
+resize carries through); an assembly file joins them:
+
+```python
+asm = A.Assembly("balance_bot", base="chassis", base_joint="free", path=__file__)
+asm.add("chassis", part="bb_chassis")
+asm.add("motor_l", part="bb_gear_motor", mass=0.03)
+asm.add("wheel_l", part="bb_wheel")
+asm.join("chassis.motor_l", "motor_l.mount", "fixed")
+asm.join("motor_l.shaft", "wheel_l.hub", "wheel", flip=True,
+         motor=A.Motor(torque=0.08, speed=20))
+asm.use_rules("wheel hub", wheel="wheel_l", shaft="motor_l")
+asm.run()
+```
+
+```
+balance_bot: 5 parts, 4 joints, 4/4 rules ok -> models\exports\balance_bot
+```
+
+- **Rules, confirmed by you.** Before resizing, Claude writes down what a
+  part is for and the rules that follow ("bore = motor shaft + 0.1"), and
+  uses them only after you say yes. Rules that set a size carry it through
+  (change the motor, the wheel bore follows); rules that check a size warn
+  when broken. Saved as plain text, per project (`cad/rules/`) or
+  worldwide for every project (`library/rules/` in the skill, git-ignored),
+  so the next similar part comes with suggestions.
+- **Checks that warn, never block**: under-defined parts (naming what can
+  still move), overlapping parts, connection points stuck at a typed-in
+  number while their part resizes, broken rules.
+- **Outputs** in `cad/exports/<name>/`: a placement report, a picture with
+  connector axis markers, a STEP of the whole assembly, and a MuJoCo model
+  (bodies, joints, motors, masses and inertias from the CAD geometry) that
+  is checked to load and step.
+- Example: [`models/balance_bot.py`](./models/balance_bot.py). Reference:
+  [`references/assembly.md`](./references/assembly.md). Design:
+  [`docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md).
+  Needs `pip install mujoco` in the venv.
+
 ## Install
 
 **Option A — one file.** Download [`cad-bench.skill`](./cad-bench.skill) from

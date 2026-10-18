@@ -319,6 +319,43 @@ in the working folder). Never run git yourself for CAD history.
 - `cad.py history` prints one summary line; `--json` prints the full list,
   only when you genuinely need it.
 
+## Assemblies
+
+Several parts joined into a machine (a robot chassis, a mechanism). Lookup:
+`references/assembly.md`; worked example: `models/balance_bot.py`.
+
+1. **Purpose first.** Before resizing a part or first using it in an
+   assembly, write down in plain words what it is for and the rules that
+   follow ("wheel hub: bore = motor shaft Ø + 0.1, press fit; hub length ≥
+   1.5 × shaft Ø"). Get the user's OK, then ask **project only or
+   worldwide**. Save as a `.rules` file in `cad/rules/` (project) or
+   `<skill>/library/rules/` (worldwide; git-ignored, never committed unless
+   the user explicitly contributes it). Only files with a `confirmed:` line
+   are used. For a new part, `python scripts/rules.py list <assembly.py>`
+   shows the saved kinds; propose matching rules and wait for a yes before
+   applying them.
+2. **Connectors on each part**, computed from its parameters, next to
+   `build()`: `A.frame` (pins everything), `A.axis` (roll free: shafts,
+   hubs), `A.point`, or anchored to a feature with `A.on_face` /
+   `A.on_edge` / `A.on_circle`. A connector's z points out of its part.
+3. **Assembly file** in `cad/assemblies/<name>.py` (or beside the parts in
+   `models/`): `add` parts, `join("a.conn", "b.conn", type)` with `fixed`,
+   `revolute`, `slider`, `cylindrical` or `wheel`, an optional
+   `motor=A.Motor(...)`, and `use_rules(kind, role=instance)`. Never type
+   world coordinates.
+4. **Run it**: `python <assembly>.py`. One line on a clean run, one
+   `warn:` line per problem. Warnings never block (under-defined parts with
+   the free motions named, overlaps, hard-coded connectors, broken rules).
+   Exports go to `cad/exports/<name>/`: `report.txt`, `<name>.png`,
+   `<name>.step`, and a MuJoCo `<name>.xml` that has already loaded and
+   stepped in `mujoco`.
+5. **Look at the PNG after changing any join**: the connector triads (x red,
+   y green, z blue) show a flipped or turned part at once. Read
+   `report.txt` for numbers rather than adding prints.
+
+`import assembly as A` alongside `import brep as B`; needs `pip install mujoco`
+in the venv.
+
 ## Token economy
 
 Keep the gates that are cheap and catch real bugs; cut verification that
