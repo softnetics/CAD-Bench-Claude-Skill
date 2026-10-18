@@ -41,3 +41,8 @@ models/exports/
 # Worldwide rule library (rules.py): personal, never pushed to the public repo
 # unless the user explicitly contributes a rule
 library/
+
+# models/ is the shipped worked example only; user rules belong in a
+# project's cad/rules/. Anything else dropped in here stays out of the repo.
+models/rules/*
+!models/rules/wheel-hub.rules

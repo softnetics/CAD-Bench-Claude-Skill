@@ -290,3 +290,15 @@ def test_docstring_example_matches_the_shipped_rule_file():
     example = [ln.split(":", 1)[1].split("#")[0].strip() for ln in doc if ln.startswith("rule:")]
     assert example == [r.text for r in shipped.rules]
     assert f"purpose: {shipped.purpose}" in doc
+
+
+def test_user_rules_in_models_are_git_ignored_but_the_example_is_not():
+    import subprocess
+    root = R.SKILL_ROOT
+
+    def ignored(rel):
+        r = subprocess.run(["git", "check-ignore", "-q", "--no-index", rel], cwd=root)
+        return r.returncode == 0
+    assert ignored("models/rules/my-robot-arm.rules")
+    assert not ignored("models/rules/wheel-hub.rules")
+    assert ignored("library/rules/anything.rules")
