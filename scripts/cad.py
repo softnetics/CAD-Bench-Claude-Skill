@@ -15,6 +15,9 @@
     serve [--port N]         run the live bench (blocks; prints its URL)
     sense <part>             flag redundant / no-effect / hard-coded dimensions
     drawing <part>           write cad/exports/<part>.svg (exact views)
+    assemble <name|path>     run cad/assemblies/<name>.py (or a file): solve, check,
+                             export to cad/exports/<name>/; prints its summary line
+                             and one `warn:` line per warning
 
 Every command prints exactly one line on success. A refusal (detached HEAD,
 nothing to keep, no project, ...) prints one line to stderr and exits 1.
@@ -30,6 +33,10 @@ os.environ.setdefault("BREP_QUIET", "1")  # no kernel-import notice: one line pe
 
 import cadvc  # noqa: E402
 from cadproj import ProjectError, load_settings, open_project  # noqa: E402
+
+
+class _Failed(Exception):
+    """A command failure whose one line is already worded."""
 
 
 def _project(a, create=False):
@@ -130,6 +137,35 @@ def cmd_drawing(a):
     return f"drawing {a.part} → {out}"
 
 
+def _assembly_file(a):
+    t = Path(a.target)
+    if t.suffix == ".py" or len(t.parts) > 1:
+        for f in (t, Path(a.project) / t):
+            if f.is_file():
+                return f.resolve()
+        raise ProjectError(f"no assembly file {a.target}")
+    p = _project(a)
+    f = p.assemblies / f"{a.target}.py"
+    if not f.is_file():
+        have = ", ".join(sorted(x.stem for x in p.assemblies.glob("*.py"))) or "none"
+        raise ProjectError(f"no assembly named {a.target!r} in {p.assemblies} (have: {have})")
+    return f
+
+
+def cmd_assemble(a):
+    f = _assembly_file(a)
+    import asm_export  # lazy: pulls in the kernel
+    import assembly
+    asm_export.last_run = None
+    try:
+        assembly.run_file(f)
+    except assembly.ASSEMBLY_ERRORS as e:
+        raise _Failed(assembly.error_line(e)) from e
+    if asm_export.last_run is None:
+        raise ProjectError(f"{f.name} ran but never called asm.run()")
+    return None                 # run() printed the summary line (and any warn: lines)
+
+
 # ----------------------------------------------------------------------- CLI
 
 def _parser():
@@ -160,6 +196,8 @@ def _parser():
     add("serve", cmd_serve, help="run the live bench").add_argument("--port", type=int, default=0)
     add("sense", cmd_sense, help="dimension sensing for one part").add_argument("part")
     add("drawing", cmd_drawing, help="write cad/exports/<part>.svg").add_argument("part")
+    add("assemble", cmd_assemble,
+        help="run cad/assemblies/<name>.py (or a path) and export it").add_argument("target")
     return ap
 
 
@@ -175,6 +213,9 @@ def main(argv=None):
     except (cadvc.VCError, ProjectError) as e:
         print(f"cad {a.cmd}: {str(e).splitlines()[0] if str(e) else type(e).__name__}",
               file=sys.stderr)
+        return 1
+    except _Failed as e:
+        print(str(e), file=sys.stderr)
         return 1
     if line is not None:
         print(line)

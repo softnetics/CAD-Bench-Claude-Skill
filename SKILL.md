@@ -331,20 +331,26 @@ Several parts joined into a machine (a robot chassis, a mechanism). Lookup:
    worldwide**. Save as a `.rules` file in `cad/rules/` (project) or
    `<skill>/library/rules/` (worldwide; git-ignored, never committed unless
    the user explicitly contributes it). Only files whose `confirmed:` is a
-   date (`2026-10-18`) or `true` are used. For a new part, `python scripts/rules.py list <assembly.py>`
-   shows the saved kinds; propose matching rules and wait for a yes before
-   applying them.
+   date (`2026-10-18`) or `true` are used. For a new part,
+   `python scripts/rules.py list <assembly.py>` shows the saved kinds;
+   propose matching rules and wait for a yes before applying them.
 2. **Connectors on each part**, computed from its parameters, next to
    `build()`: `A.frame` (pins everything), `A.axis` (roll free: shafts,
    hubs), `A.point`, or anchored to a feature with `A.on_face` /
    `A.on_edge` / `A.on_circle`. A connector's z points out of its part.
-3. **Assembly file** in `cad/assemblies/<name>.py` (or beside the parts in
-   `models/`): `add` parts, `join("a.conn", "b.conn", type)` with `fixed`,
-   `revolute`, `slider`, `cylindrical` or `wheel`, an optional
-   `motor=A.Motor(...)`, and `use_rules(kind, role=instance)`. Never type
-   world coordinates.
-4. **Run it**: `python <assembly>.py`. One line on a clean run, one
-   `warn:` line per problem. Warnings never block (under-defined parts with
+3. **Assembly file** in the project's `cad/assemblies/<name>.py`, parts in
+   `cad/parts/`, rules in `cad/rules/`. (`models/` in the skill holds only
+   the shipped worked example; never put the user's parts, assemblies or
+   rules there: the skill is a clone of a public repo.) Start it with the
+   same path line generated parts use, so it also runs on its own:
+   `sys.path.insert(0, os.environ.get("CAD_BENCH_SCRIPTS") or r"<skill>/scripts")`,
+   then `import assembly as A`. `add` parts, `join("a.conn", "b.conn",
+   type)` with `fixed`, `revolute`, `slider`, `cylindrical` or `wheel`, an
+   optional `motor=A.Motor(...)`, and `use_rules(kind, role=instance)`.
+   Never type world coordinates.
+4. **Run it**: `python scripts/cad.py assemble <name> --project DIR` (puts
+   the skill's scripts on the path). One line on a clean run, one
+   `warn:` line per problem; an error is one `assembly: ...` line, exit 1. Warnings never block (under-defined parts with
    the free motions named, overlaps, hard-coded connectors, broken rules).
    Exports go to `cad/exports/<name>/`: `report.txt`, `<name>.png`,
    `<name>.step`, and a MuJoCo `<name>.xml` that has already loaded and

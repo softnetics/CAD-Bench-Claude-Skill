@@ -148,7 +148,11 @@ def summary(solved, out):
     return f"{asm.name}: {', '.join(bits)} -> {where}"
 
 
+last_run = None          # the latest run's Solved (cad.py assemble checks run() happened)
+
+
 def run(asm, out_dir=None, quiet=False):
+    global last_run
     import asm_render
     import mjcf
 
@@ -160,6 +164,7 @@ def run(asm, out_dir=None, quiet=False):
     write_step(solved, out / f"{asm.name}.step")
     asm_render.render(solved, out / f"{asm.name}.png")
     mjcf.write(solved, out / f"{asm.name}.xml", masses)
+    last_run = solved
     if not quiet:
         print(summary(solved, out))
         for w in solved.warnings:

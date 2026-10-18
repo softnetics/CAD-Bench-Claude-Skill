@@ -70,11 +70,20 @@ These need the built solid: `connectors(P)` may call `build(P)` and select.
 
 ## 3. The assembly file
 
-In a project: `cad/assemblies/<name>.py`, parts found in `cad/parts/`. Under
-`models/`: parts in the same folder. Part lookup is `../parts/` then the
-assembly's own folder.
+In a project: `cad/assemblies/<name>.py`, parts found in `cad/parts/`, rules
+in `cad/rules/` (`cad.py init` creates all three). `models/` in the skill is
+the shipped worked example only, with its parts in the same folder; user
+assemblies, parts and rules always go in a project's `cad/`. Part lookup is
+`../parts/` then the assembly's own folder.
 
 ```python
+import os
+import sys
+
+# the same line generated parts use: run by `cad.py assemble`, or on its own
+sys.path.insert(0, os.environ.get("CAD_BENCH_SCRIPTS") or r"<skill>/scripts")
+import assembly as A
+
 asm = A.Assembly("balance_bot", base="chassis", base_joint="free", path=__file__)
 asm.add("chassis", part="bb_chassis", params={"plate_x": 140}, material="PLA")
 asm.add("motor_l", part="bb_gear_motor", mass=0.03)       # kg, overrides density
@@ -97,7 +106,12 @@ asm.run()
 - Moving joints are shown and exported at position 0.
 - Materials (g/cm³): PLA 1.24, PETG 1.27, ABS 1.04, aluminium 2.70, steel 7.85.
 
-Run: `python <assembly>.py` or `python scripts/assembly.py <assembly>.py`.
+Run: `python scripts/cad.py assemble <name> [--project DIR]` (a name in
+`cad/assemblies/`, or a path to the file). It puts the skill's scripts on the
+path, so it works without the line above being right. Also:
+`python scripts/assembly.py <assembly>.py`, or `python <assembly>.py` once the
+path line points at the skill. A rule, MuJoCo or assembly error is one
+`assembly: ...` line on stderr, exit 1.
 
 ## 4. Purpose and rules
 

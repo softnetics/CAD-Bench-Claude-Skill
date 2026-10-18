@@ -12,8 +12,10 @@ Run alone:  <venv>/Scripts/python models/bb_gear_motor.py   (verified STL)
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "scripts"))
+# The skill's scripts: CAD_BENCH_SCRIPTS (set by `cad.py assemble`), else this
+# repo's own scripts/ (copied into a project, set the variable or the path).
+sys.path.insert(0, os.environ.get("CAD_BENCH_SCRIPTS")
+                or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 import brep as B
 import assembly as A
 
