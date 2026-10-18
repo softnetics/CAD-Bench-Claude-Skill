@@ -50,8 +50,11 @@ def _git(repo, *args, env=None) -> str:
     if env:
         full_env = dict(os.environ)
         full_env.update(env)
-    r = subprocess.run(["git", *args], cwd=str(cwd), env=full_env,
-                       stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8")
+    try:
+        r = subprocess.run(["git", *args], cwd=str(cwd), env=full_env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8")
+    except OSError as e:  # git missing, or a folder Windows can't run in (path over 260 chars)
+        raise VCError(f"cannot run git in {cwd}: {e.strerror or e}") from None
     if r.returncode != 0:
         lines = [ln for ln in (r.stderr or r.stdout).splitlines() if ln.strip()]
         raise VCError(lines[0] if lines else f"git {args[0]} failed")
@@ -250,7 +253,6 @@ def _branch_commit(repo, msg):
 def _sense_note(p, names):
     """` · sense: N flags` for the parts among `names` (committed paths), or ""."""
     try:
-        import sense as _sense  # lazy: pulls in the kernel
         from partmodel import effective_params, load_model
         stems = set()
         for nm in names:
@@ -262,9 +264,56 @@ def _sense_note(p, names):
             f = p.parts / f"{stem}.py"
             if stem.startswith("_") or not f.is_file():
                 continue  # deleted or private
+            import sense as _sense  # lazy: pulls in the kernel, only when a part changed
             model = load_model(f)
             n += len(_sense.sense(model, effective_params(model, p.parts / f"{stem}.params.json")))
         return f" · sense: {n} flag{'' if n == 1 else 's'}" if n else ""
+    except Exception:
+        return ""
+
+
+def _measure(repo, cad_tree, stem):
+    """(volume mm³, bbox size) of part `stem` as stored in `cad_tree`, or None."""
+    src = _try_git(repo, "show", f"{cad_tree}:parts/{stem}.py")
+    if src is None:
+        return None
+    from partmodel import build_part, effective_params, load_model
+    pj = _try_git(repo, "show", f"{cad_tree}:parts/{stem}.params.json")
+    tmp = Path(tempfile.mkdtemp(prefix="cadvc-part-"))
+    try:
+        (tmp / f"{stem}.py").write_text(src, encoding="utf-8")
+        if pj is not None:
+            (tmp / f"{stem}.params.json").write_text(pj, encoding="utf-8")
+        model = load_model(tmp / f"{stem}.py")
+        solid = build_part(model, effective_params(model, tmp / f"{stem}.params.json"))
+        bb = solid.bounding_box()
+        size = (bb.max.X - bb.min.X, bb.max.Y - bb.min.Y, bb.max.Z - bb.min.Z)
+        return float(solid.volume), size
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _part_delta(repo, a_tree, b_tree):
+    """` · volume +2.1 cm³, bbox 80×60×30 → 90×60×30` when exactly one part's
+    model or values differ between two cad trees (and it exists in both), else ""."""
+    try:
+        if not a_tree or not b_tree:
+            return ""
+        out = _git(repo, "diff-tree", "-r", "--name-only", a_tree, b_tree, "--", "parts")
+        stems = set()
+        for nm in out.splitlines():
+            q = Path(nm)
+            if q.parent.name == "parts" and q.name.endswith((".py", ".params.json")):
+                stems.add(q.name.split(".")[0])
+        if len(stems) != 1 or next(iter(stems)).startswith("_"):
+            return ""
+        stem = stems.pop()
+        a, b = _measure(repo, a_tree, stem), _measure(repo, b_tree, stem)
+        if a is None or b is None:
+            return ""
+        dims = lambda size: "×".join(f"{round(v, 1):g}" for v in size)
+        box = dims(a[1]) if dims(a[1]) == dims(b[1]) else f"{dims(a[1])} → {dims(b[1])}"
+        return f" · volume {(b[0] - a[0]) / 1000:+.1f} cm³, bbox {box}"
     except Exception:
         return ""
 
@@ -276,15 +325,17 @@ def checkpoint(p, name=None) -> str:
     state = _load_state(repo)
     if state.get("active"):
         sha, parent = _try_commit(repo, state, f"try: {name}")
-        n = _n_changed(repo, parent and _cad_tree(repo, parent), _cad_tree(repo, sha))
-        return _summary("try-checkpoint", name, n, sha)
+        before, after = parent and _cad_tree(repo, parent), _cad_tree(repo, sha)
+        n = _n_changed(repo, before, after)
+        return _summary("try-checkpoint", name, n, sha) + _part_delta(repo, before, after)
     sha, n = _branch_commit(repo, f"cad: {name}")
     if state.pop("cursor", None) is not None:
         _save_state(repo, state)
     if sha is None:
         return _summary("unchanged", name, 0, _head(repo))
     names = _git(repo, "show", "--name-only", "--format=", sha).splitlines()
-    return _summary("checkpoint", name, n, sha) + _sense_note(p, names)
+    delta = _part_delta(repo, _cad_tree(repo, f"{sha}^"), _cad_tree(repo, sha))
+    return _summary("checkpoint", name, n, sha) + delta + _sense_note(p, names)
 
 
 def try_(p, idea) -> str:
@@ -325,11 +376,12 @@ def revert(p, reason) -> str:
     sha, _ = _try_commit(repo, state, f"abandoned: {reason}")
     base_tree = state["base_tree"]
     n = _n_changed(repo, _cad_tree(repo, sha), base_tree)
+    delta = _part_delta(repo, _cad_tree(repo, sha), base_tree)
     _restore(repo, base_tree)
     idea = state["active"]
     _clear_active(state)
     _save_state(repo, state)
-    return _summary("reverted", idea, n, sha)
+    return _summary("reverted", idea, n, sha) + delta
 
 
 def keep(p) -> str:
@@ -343,7 +395,8 @@ def keep(p) -> str:
     state.setdefault("kept", []).append(slug)
     _clear_active(state)
     _save_state(repo, state)
-    return _summary("kept", idea, n, sha or _head(repo))
+    delta = _part_delta(repo, _cad_tree(repo, f"{sha}^"), _cad_tree(repo, sha)) if sha else ""
+    return _summary("kept", idea, n, sha or _head(repo)) + delta
 
 
 # --------------------------------------------------------------- back/forward

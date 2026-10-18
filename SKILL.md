@@ -37,6 +37,30 @@ back for verification. Record the venv path; every run uses its `python`.
 
 ## Workflow
 
+### 0. Project folder
+
+Parts live with the user's project, not in this skill. Work in the folder the
+user is working in (pass `--project DIR` to run from elsewhere):
+
+```
+python <skill>/scripts/cad.py init
+```
+
+`<skill>` is this skill's folder; `python` is the venv's. `init` creates (or
+reopens) `cad/` there:
+
+```
+cad/parts/            <name>.py, <name>.params.json, <name>.recipe.js
+cad/assemblies/
+cad/exports/          STL / STEP / drawings -- rebuilt on demand, never versioned
+cad/.cad-bench.json   per-project settings (auto-checkpoint)
+```
+
+Inside an existing git repo (a firmware project, say) CAD checkpoints are
+ordinary commits in that repo that only ever contain `cad/` paths; otherwise
+`cad/` gets a repo of its own. The skill's `models/` holds worked examples
+only.
+
 ### 1. Pin down the geometry and what binds
 
 The feature tree: which primitives, where, combined in what order. Then the
@@ -75,15 +99,18 @@ modelling mistake.
 ### 2. Scaffold, don't hand-write
 
 ```
-python scripts/new_part.py --name spacer_plate \
+python <skill>/scripts/new_part.py --project <working folder> --name spacer_plate \
     --params "plate_x=90,plate_y=50,plate_t=4,bore_d=30,hole_d=4.5,inset=8"
 ```
 
-Writes `models/spacer_plate.py` (runnable immediately, builds a placeholder
-box) and `models/spacer_plate.recipe.js` (a bench entry stub with matching
-sliders). Run it as-is to confirm the harness works, then replace `derive()`,
-`build()`, and the recipe's `checks()`/`draw()`. Parameter names are already
-identical on both sides, which is the one coupling that must hold.
+Writes `cad/parts/spacer_plate.py` (runnable immediately, builds a placeholder
+box) and `cad/parts/spacer_plate.recipe.js` (sliders, cards, checks). Run the
+model as-is to confirm the harness works, then replace `derive()`, `build()`,
+and the recipe's `derive()`/`checks()`. Parameter names are already identical
+on both sides, which is the one coupling that must hold. The recipe's `draw()`
+is optional: the live bench draws exact views from the kernel (§5).
+`--examples` writes into the skill's own `models/` instead -- only for a new
+worked example.
 
 ### 3. Model it — the rules that prevent most failures
 
@@ -163,72 +190,129 @@ the host's own profile over booleaning two independent tessellations
 together. Full method, with the real numbers from where this went wrong
 twice, in `references/verification.md`.
 
-### 5. Bench page
+### 5. Live bench
 
-One shared CAD Bench artifact, a multi-part picker. First use: publish
-`assets/bench-template.html` (declares the `db` capability — read
-`artifact-capabilities` first). Later parts: read the artifact, paste your
+```
+python <skill>/scripts/cad.py serve
+```
+
+Start it **in the background** (it blocks) once per session. It prints one
+line, `bench: http://127.0.0.1:<port>/  (<n> parts)`; open that URL in the
+app's browser pane and point the user at it. One server serves every part in
+the project and picks up model edits on the next slider move (no restart).
+
+What the page does: a slider move rebuilds the part in the warm kernel and
+redraws exact top / front / side / iso views (hidden edges dashed) in about
+50 ms; the recipe's `cards` and `checks()` update with it. Typed values are
+used exactly -- 0.4 stays 0.4, outside the slider's range too; an impossible
+value shows as a red check or a build error, never as a silently different
+number. A build error keeps the last good views up and shows the one-line
+error. The History tab shows each part's checkpoints and tries with their
+drawings and can go to, compare with, or branch from any of them. **"Hand
+these to Claude"** writes `cad/parts/<part>.params.json` directly.
+
+**Dimension sensing** -- `python <skill>/scripts/cad.py sense <part>` (also
+run at each checkpoint, reported as `· sense: N flags`): nudges each
+parameter, rebuilds, and reports redundant pairs, parameters with no effect,
+and hard-coded features. It only flags; propose the fix to the user, never
+rewrite the model on your own.
+
+#### Sharing: the claude.ai CAD Bench artifact
+
+For viewing from another device or sharing, the published CAD Bench artifact
+stays: one artifact, a multi-part picker. It shows the last exact drawing as
+a static SVG, not live views:
+
+```
+python <skill>/scripts/cad.py drawing <part>      # writes cad/exports/<part>.svg
+```
+
+and that part's recipe in the artifact gets a `draw()` that returns that SVG
+string (it is sized for the page's 620×400 drawing area). First use: publish
+`assets/bench-template.html` (declares the `db` capability -- read
+`artifact-capabilities` first). Later parts: read the artifact, paste the
 `.recipe.js` into `PARTS`, republish to the same URL.
 
 **Before publishing, always:**
 
 ```
-python scripts/check_bench.py <bench.html>
+python <skill>/scripts/check_bench.py <bench.html>
 ```
 
 It runs every recipe headlessly at defaults and at every slider extreme, and
-fails on two classes of bug this format has. One: reading `d.plate_x` when
-`plate_x` is a slider gives `undefined`, `undefined >= 2` is an ordinary
-`false`, and the row goes **red like a real constraint failure** — so you
-tune sliders chasing a typo. Sliders are on `p`, computed values on `d`. Two:
-a `draw()` whose views were scaled to fit their own content with no bound on
+fails on the bugs this format has. One: reading `d.plate_x` when `plate_x` is
+a slider gives `undefined`, `undefined >= 2` is an ordinary `false`, and the
+row goes **red like a real constraint failure** -- so you tune sliders chasing
+a typo. Sliders are on `p`, computed values on `d`. Two: a hand-written
+`draw()` whose views were scaled to fit their own content with no bound on
 where the result lands, so a caption or a whole second view ends up drawn on
-top of another shape — unreadable, but nothing throws. The checker parses
-the SVG for text mostly covered by a filled shape, and solid shapes heavily
-overlapping each other, at every slider extreme, not just defaults. Field
-spec, the SVG helpers, and how to lay out more than one view without this
-happening are in `references/bench-artifact.md`.
-
-**A `draw()` sketch is the default, not the only option.** For a part whose
-shape is genuinely curved (a loft, a doubly-curved surface) a flat 2D sketch
-means reimplementing projection math by hand — verified error-prone (a
-bean-shaped visor's silhouette was traced wrong this way, from a real
-per-slice-boundary bug). `references/live-mesh-preview.md` has a decision
-checklist for when it's worth building a real live-rendered `mesh()`
-instead (three.js + three-bvh-csg, gated by `scripts/check_mesh_parity.py`)
-and when it isn't — most parts stay on the plain SVG sketch.
-
-Then hand the user the link: adjust sliders, and when the checks are green
-press **"Hand these to Claude"**.
+top of another shape. Three: a model `PARAMS` key with no slider, which the
+page can never set. Field spec and the SVG helpers are in
+`references/bench-artifact.md`; for a genuinely curved part,
+`references/live-mesh-preview.md` covers a live 3D `mesh()` instead.
 
 **"Always" includes republishing an existing part, not just a first-time
-recipe.** The bench recipe and the model are two independent
-implementations of one design — nothing keeps a fix made in `build()`/
-`derive()` from silently going stale in the recipe's `derive()`/`checks()`
-except this lint. Concretely: fixing a constraint in the model (say, which
-variables a feature is anchored to) and forgetting to mirror the same
-change into the recipe leaves the bench describing a part that no longer
-matches what the model builds — nothing errors, the old recipe just keeps
-reporting green on the wrong geometry. Re-run `check_bench.py` on *every*
-republish, including "just a small model fix," and re-check whether the
-recipe's own default `val`s still pass any check you just added — a check
-added in response to a newly-found bug can fail the shipped defaults, which
-means the bug was live in the stock preset the whole time.
+recipe.** The recipe's `derive()`/`checks()` and the model are two
+independent implementations of one design -- nothing keeps a fix made in
+`build()`/`derive()` from silently going stale in the recipe except this
+lint. Re-run `check_bench.py` on *every* republish, including "just a small
+model fix," and re-check whether the recipe's own default `val`s still pass
+any check you just added -- a check added in response to a newly-found bug
+can fail the shipped defaults, which means the bug was live in the stock
+preset the whole time.
 
 ### 6. Read back, regenerate, deliver
 
+When the user says they handed the values over, they are already in
+`cad/parts/<part>.params.json`. Re-run the model -- it picks the file up
+automatically and exports to `cad/exports/<part>.stl`:
+
 ```
-Artifact  action:read_db  url:<artifact-url>  db_op:get
-          collection:"bench"  doc_id:"<part>"
+python cad/parts/<part>.py
 ```
 
-Write the returned `params` to `models/<part>.params.json` and re-run the
-model — it picks the file up automatically. Send the STL with the
-file-delivery tool and report volume, bbox, and which constraint had the
-least margin; that is where the next change will break something.
+(Values handed over from the shared claude.ai artifact instead: read them
+once with `Artifact action:read_db url:<artifact-url> db_op:get
+collection:"bench" doc_id:"<part>"` and write the returned `params` to that
+same file.) Send the STL with the file-delivery tool and report volume, bbox,
+and which constraint had the least margin; that is where the next change will
+break something.
 
-Each hand-off overwrites `bench/<part>`. If you add a dimension to the model,
-add the slider in the same change or the round-trip silently drops it.
+If you add a dimension to the model, add the slider in the same change or the
+bench can never set it.
+
+## Version control
+
+The user talks in plain words; you run `cad.py` (add `--project DIR` when not
+in the working folder). Never run git yourself for CAD history.
+
+| The user says | Run |
+|---|---|
+| "checkpoint", "save this" | `cad.py checkpoint [name]` |
+| "try <idea>", "experiment with" | `cad.py try <idea>` |
+| "revert", "that didn't work" | `cad.py revert <one-line reason>` |
+| "keep it" | `cad.py keep` |
+| "back" / "undo", "forward" / "redo" | `cad.py back` / `cad.py forward` |
+| "auto checkpoints on/off" | `cad.py auto on` / `cad.py auto off` |
+| "what have we tried", "history" | `cad.py history [part]` |
+
+- **Manual by default**: checkpoint when the user asks. With auto on, the
+  bench checkpoints at every hand-off.
+- **A snapshot covers `cad/` together** (model, values, recipe), so a revert
+  can never desync them. Exports are not stored; rebuild them.
+- **Each command prints one line; relay it, don't expand on it.** E.g.
+  `checkpoint wider · 1 file · 39471b3 · volume +2.0 cm³, bbox 40×40×10 →
+  50×40×10 · sense: 1 flag`. The volume/bbox delta appears when exactly one
+  part changed; a `sense` note means `cad.py sense <part>` has flags to look at.
+- **A refusal is one line on stderr, exit code 1** (detached HEAD, a merge in
+  progress, nothing to keep, unsaved changes before `back`). Tell the user
+  what it says; never work around it with git.
+- `revert` keeps the abandoned attempt on the graph with its reason (the
+  History tab shows it). `back` / `forward` restore `cad/` without moving
+  `HEAD`; the next checkpoint records where you are. Nothing touches files
+  outside `cad/` or switches the branch.
+- `cad.py history` prints one summary line; `--json` prints the full list,
+  only when you genuinely need it.
 
 ## Token economy
 
@@ -238,7 +322,7 @@ only *feels* thorough.
 **Keep:**
 - `wall_check()` / `export_verified()` in the model — one line on success by
   design (see §4), so running it often costs almost nothing.
-- `check_bench.py` before every publish — one Bash call, sweeps defaults and
+- `check_bench.py` before every publish of the shared artifact — one Bash call, sweeps defaults and
   every slider extreme, and is the only thing that catches model/recipe
   logic drift (see above) or a newly-broken default.
 - Running the same numbers through both the model and a standalone
@@ -262,3 +346,12 @@ only *feels* thorough.
 - Don't re-export with a tighter tolerance or add extra prints to "see the
   numbers" on a passing run (see §4) — that habit compounds across a
   session for no benefit.
+- **Never print git output.** Don't run `git log` / `status` / `diff` / `show`
+  to look at CAD history; `cad.py` prints one line per step and
+  `cad.py history` one summary line. Every git screen you print lands in
+  context for nothing the user asked to see.
+- **Never poll the bench server.** Start `cad.py serve` once in the
+  background, read its one line, open the URL in the browser pane, and stop.
+  No `curl` to see if it's up, no sleep-and-retry loops, no re-reading its
+  log. The page itself shows build errors; the user's hand-off lands in
+  `cad/parts/<part>.params.json`, which you read once when they say so.

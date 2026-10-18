@@ -9,6 +9,14 @@ read back.
 `assets/bench-template.html` is this page with one example part (`boss-plate`)
 already wired. Publish it as-is on first use; extend `PARTS` thereafter.
 
+**Two pages share this recipe format.** The live local bench
+(`assets/live-bench.html`, served by `scripts/cad.py serve`) reads each part's
+`cad/parts/<part>.recipe.js` for its sliders, `cards` and `checks()`, and draws
+exact views from the kernel itself -- it never calls `draw()`, and its
+hand-off writes `cad/parts/<part>.params.json` directly. This document is
+mostly about the other page: the published claude.ai artifact, kept for
+viewing from another device and for sharing.
+
 ## Contents
 
 1. Publishing and the `db` capability
@@ -97,24 +105,21 @@ dialing. See `references/stl-reverse-engineering.md` §5 for the case this
 was built for. Leave `locked` off entirely for ordinary design choices
 (chamfer size, clearance margin, lobe count) -- those stay free sliders.
 
-**The value box beside each slider is a typed-entry field, not a read-out.**
-A slider alone can't always land on the exact number a reviewer wants, so the
-template also renders `<input class="numbox" id="o_<id>">` next to it. On
-commit (blur, or Enter) `commitNumbox()` clamps the typed value to `[min,max]`
--- the same bound the slider enforces -- then snaps it to the slider's own
-step grid (multiples of `step` from `min`), matching what the slider would
-land on if you'd dragged there. **Round to the step grid, not just to the
-step's decimal width**: a step of `0.5` means valid values are `..., 17.0,
-17.5, 18.0, ...`, so typing `17.3` lands on `17.5`, not `17.3` -- rounding
-only the decimal *count* (1 dp) would wrongly accept `17.3`. This was
-verified empirically, not assumed: assigning an off-grid value to a range
-input's `.value` gets silently re-snapped by the browser itself, so the box
-has to replicate that or it would show a number the slider can't actually
-hold. The box briefly gets a `.clamped` (warn-coloured border) class when the
-committed value differs from what was typed, then clears itself. An
-unparseable entry (empty, letters) reverts to the slider's current value
-rather than erroring. Nothing about `params` entries needs to change to get
-this -- it reads `min`/`max`/`step` off the same row spec the slider uses.
+**The value box beside each slider is a typed-entry field, not a read-out,
+and a typed value is used exactly.** On commit (blur, or Enter) the number is
+stored as typed -- no clamp to `[min,max]`, no snap to the `step` grid: 0.4
+stays 0.4, and 250 on a slider that ends at 200 stays 250. The slider keeps
+its `step` for dragging and simply parks at its nearest end when the value is
+outside its range, while the box shows the real value with an "outside slider
+range" hint. A value the part cannot take shows up as a red check (or, on the
+live bench, a build error), and the model's own gates (`wall_check`,
+`export_verified`) still refuse a broken export -- the page never quietly
+turns it into a different number. A unit suffix (`12.5 mm`, `45°`) is
+accepted; an unparseable entry (empty, letters) reverts the box to the stored
+value. Pasted constants follow the same rule. The value store
+(`VALUES[part][id]`) is the source of truth and is identical in both pages;
+`tests/js/numbox.test.mjs` runs it from each. Nothing about `params` entries
+needs to change to get this.
 
 ## 3. derive / cards / checks / draw
 
@@ -169,7 +174,14 @@ It evaluates every recipe at defaults and at every slider extreme, and traps
 reads of keys that do not exist on the object being read -- the only reliable
 detection for this class. It exits non-zero on any problem.
 
-**`draw(p, d)` -> SVG string.** At least one orthographic view (top, or a
+**`draw(p, d)` -> SVG string.** Optional when the part is used on the live
+bench, which draws exact kernel views and never calls it. On the shared
+artifact, the preferred `draw()` returns the part's exact drawing as a static
+string: run `python scripts/cad.py drawing <part>` (writes
+`cad/exports/<part>.svg`, sized for the 620×400 drawing area) and return that
+SVG text -- it cannot miss a feature the model has, though it does not follow
+the sliders. A hand-written sketch is the fallback, and the rest of this
+section is about writing one: at least one orthographic view (top, or a
 section) with the driving dimensions and the constrained features marked.
 Scale to fit the `viewBox` (`0 0 620 400` in the template). This is a
 sanity-check sketch, not a render -- its job is to make a gross error
@@ -298,7 +310,8 @@ Artifact  action:read_db  url:<artifact-url>  db_op:get
 ```
 
 Returns the document. Take `params`, write it to
-`models/<part>.params.json`, and the model's `__main__` picks it up. If
+`cad/parts/<part>.params.json` (`models/<part>.params.json` for a skill
+example), and the model's `__main__` picks it up. If
 `savedAt` is older than your last delivery, the user hasn't re-handed --
 ask before regenerating.
 

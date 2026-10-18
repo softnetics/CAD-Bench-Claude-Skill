@@ -12,7 +12,7 @@ you: "make me an enclosure for a Pi Zero 2 W, rounded corners, USB-C cutout"
 Claude writes a parametric model (fillet → shell → chamfer → bosses → port)
         │
         ▼
-publishes a CAD Bench page — sliders, live constraint checks, a preview sketch
+opens the live bench — sliders, live constraint checks, exact kernel views
         │
         ▼
 you drag the sliders until the checks go green, click "Hand these to Claude"
@@ -182,6 +182,14 @@ cad-bench/
 │   ├── check_mesh_parity.py    verifies a live-preview mesh() matches the
 │   │                           real Python/OCCT model -- volume + bbox, at
 │   │                           every slider extreme
+│   ├── cad.py                  the plain-word CLI: init, checkpoint, try, revert,
+│   │                           keep, back/forward, auto, history, serve, sense, drawing
+│   ├── cadproj.py              a project's cad/ folder: layout and settings
+│   ├── cadvc.py                git-backed checkpoints and experiments, cad/ only
+│   ├── bench_server.py         the live bench: warm kernel + JSON API on 127.0.0.1
+│   ├── partmodel.py            loads a part file, resolves its values, builds it
+│   ├── views.py                exact hidden-line views from the kernel, as SVG
+│   ├── sense.py                dimension sensing: redundant / no-effect / hard-coded
 │   ├── new_part.py             scaffolds a new model + matching bench recipe
 │   ├── inspect_stl.py          first look at an existing STL: shape screen
 │   │                           (feature-based vs. organic/sculpted), every
@@ -205,8 +213,10 @@ cad-bench/
 │   ├── duct.py                   — loft: round-to-rectangular transition
 │   └── _parity_demo.py/.recipe.js  — check_mesh_parity.py's own test
 │                                fixture (a box with a bore), not a real part
-└── assets/
-    └── bench-template.html     the CAD Bench page, ready to publish
+├── assets/
+│   ├── live-bench.html         the live local bench page (served by bench_server.py)
+│   └── bench-template.html     the shareable claude.ai CAD Bench page, ready to publish
+└── tests/                      pytest + node tests (dev only)
 ```
 
 ## The one thing worth knowing before you use it
@@ -221,10 +231,11 @@ skill will tell you so rather than quietly hand you something wrong.
 
 ## Where it's heading
 
-Planned, in order. Nothing below is built yet; the design for step 1 is in
+Three steps, in order. Step 1 is available now; steps 2 and 3 are planned.
+The design for step 1 is in
 [`docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md).
 
-1. **Foundation**
+1. **Foundation** — *available*
    - **Your parts live with your project, not in the skill.** Invoking the
      skill in any folder creates a `cad/` folder there for one part or one
      machine:
@@ -235,17 +246,34 @@ Planned, in order. Nothing below is built yet; the design for step 1 is in
        exports/      STL / STEP / drawings, rebuilt on demand, not versioned
      ```
      `models/` in this repo stays as worked examples only.
-   - **Version control in plain words**: `checkpoint`, `try <idea>`,
-     `revert`, `keep it`, `back` / `forward`, git underneath. Inside an
-     existing repo (firmware, say) CAD checkpoints are ordinary commits next
-     to the rest, and a CAD experiment never touches non-CAD files or your
-     branch.
+   - **Version control in plain words**, git underneath. Inside an existing
+     repo (firmware, say) CAD checkpoints are ordinary commits next to the
+     rest, and a CAD experiment never touches non-CAD files or your branch.
+     Every command prints one line.
    - **Live local bench**: a local Python server keeps the kernel warm and
-     redraws exact top / front / side views, hidden edges dashed, about 50 ms
-     after each slider move. Typed values are used exactly (no clamping or
-     step snapping). The bench flags sliders that duplicate each other or do
-     nothing, and features pinned by a hard-coded number. A History tab shows
-     each part's branch graph with a drawing per checkpoint.
+     redraws exact top / front / side / iso views, hidden edges dashed, about
+     50 ms after each slider move. Typed values are used exactly (no clamping
+     or step snapping). The bench flags sliders that duplicate each other or
+     do nothing, and features pinned by a hard-coded number. A History tab
+     shows each part's branch graph with a drawing per checkpoint.
+
+   The commands (Claude runs them for you; `--project DIR` to point at a
+   project from elsewhere):
+   ```
+   python scripts/cad.py init                 create or reopen cad/ here
+   python scripts/cad.py checkpoint [name]    snapshot now (manual by default)
+   python scripts/cad.py try <idea>           start an experiment
+   python scripts/cad.py revert <reason>      abandon it (kept on the graph)
+   python scripts/cad.py keep                 the experiment becomes the main version
+   python scripts/cad.py back | forward       undo / redo across checkpoints
+   python scripts/cad.py auto on|off          checkpoint at every bench hand-off
+   python scripts/cad.py history [part]       one-line summary (--json: full list)
+   python scripts/cad.py serve                the live bench, on 127.0.0.1
+   python scripts/cad.py sense <part>         redundant / no-effect / hard-coded flags
+   python scripts/cad.py drawing <part>       exact views to cad/exports/<part>.svg
+   python scripts/new_part.py --project DIR --name <part> --params "a=1,b=2"
+   ```
+
 2. **Assemblies**: parts join at named connection points computed from their
    own dimensions, so a resize carries through. Under-defined placement warns.
    Exports a STEP of the whole assembly and a MuJoCo model.

@@ -103,7 +103,7 @@ def _import_build123d():
         return real_glob(pattern, *a, **kw)
 
     _glob.glob = filtered
-    if not scan_fonts:
+    if not scan_fonts and not os.environ.get("BREP_QUIET"):  # cad.py sets it: one line per command
         print("brep: skipping font scan (Text() is unaffected -- verified) "
               "-- set BREP_FONTS=1 to restore it", file=sys.stderr)
     # Several stock Windows fonts have malformed tables. fontTools reports
