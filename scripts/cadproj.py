@@ -17,6 +17,7 @@ class Project:
     cad: Path
     parts: Path
     assemblies: Path
+    rules: Path
     exports: Path
     settings_path: Path
     skill_scripts: Path
@@ -32,12 +33,13 @@ def open_project(working_dir, create=True):
         cad=cad,
         parts=cad / "parts",
         assemblies=cad / "assemblies",
+        rules=cad / "rules",
         exports=cad / "exports",
         settings_path=cad / ".cad-bench.json",
         skill_scripts=Path(__file__).resolve().parent,
     )
     if create:
-        for d in (p.parts, p.assemblies, p.exports):
+        for d in (p.parts, p.assemblies, p.rules, p.exports):
             d.mkdir(parents=True, exist_ok=True)
         if not p.settings_path.exists():
             save_settings(p, dict(DEFAULT_SETTINGS))

@@ -39,3 +39,11 @@ def test_gitignore_excludes_settings_and_upgrades_existing(plain_dir):
     open_project(plain_dir)
     lines = gi.read_text().splitlines()
     assert lines == ["exports/", "__pycache__/", "mine.tmp", ".cad-bench.json"]
+
+
+def test_creates_rules_folder_idempotently(plain_dir):
+    p = open_project(plain_dir)
+    assert p.rules == p.cad / "rules" and p.rules.is_dir()
+    (p.rules / "hub.rules").write_text("kind: hub\n")
+    open_project(plain_dir)
+    assert (p.rules / "hub.rules").read_text() == "kind: hub\n"
