@@ -157,7 +157,7 @@ skill** button on the file card; click it and you're done.
 **Option B — clone it.**
 
 ```bash
-git clone https://github.com/<you>/cad-bench.git ~/.claude/skills/cad-bench
+git clone https://github.com/softnetics/CAD-Bench-Claude-Skill.git ~/.claude/skills/cad-bench
 ```
 
 Either way, Claude picks it up automatically the next time a request looks
@@ -170,6 +170,7 @@ standoffs, ducts, jigs. You don't need to name the skill for it to trigger.
 cad-bench/
 ├── SKILL.md                    the workflow Claude follows
 ├── HOWTO.md                    the end-user walkthrough, with real screenshots
+├── docs/superpowers/specs/     design documents for planned work
 ├── package.json                three.js/three-bvh-csg, dev-only tooling for
 │                                check_mesh_parity.py -- npm install, never a
 │                                runtime dependency of anything published
@@ -212,11 +213,45 @@ cad-bench/
 
 Fillets, chamfers, shells and lofts are **exact geometry**, not a faceted
 guess — that's the entire point of building on a real kernel instead of mesh
-CSG. What it *can't* do: assemblies with mates, thread modelling, sheet-metal
+CSG. What it *can't* do yet: assemblies with mates (planned, see below), thread modelling, sheet-metal
 unfolding, FEA, sculpted/organic shapes (a character model, anything with
 continuously varying freeform curvature — there's no feature tree to
 recover), or file formats other than STL/STEP. If you need those, this
 skill will tell you so rather than quietly hand you something wrong.
+
+## Where it's heading
+
+Planned, in order. Nothing below is built yet; the design for step 1 is in
+[`docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md).
+
+1. **Foundation**
+   - **Your parts live with your project, not in the skill.** Invoking the
+     skill in any folder creates a `cad/` folder there for one part or one
+     machine:
+     ```
+     <your project>/cad/
+       parts/        <name>.py, <name>.params.json, <name>.recipe.js
+       assemblies/   (step 2)
+       exports/      STL / STEP / drawings, rebuilt on demand, not versioned
+     ```
+     `models/` in this repo stays as worked examples only.
+   - **Version control in plain words**: `checkpoint`, `try <idea>`,
+     `revert`, `keep it`, `back` / `forward`, git underneath. Inside an
+     existing repo (firmware, say) CAD checkpoints are ordinary commits next
+     to the rest, and a CAD experiment never touches non-CAD files or your
+     branch.
+   - **Live local bench**: a local Python server keeps the kernel warm and
+     redraws exact top / front / side views, hidden edges dashed, about 50 ms
+     after each slider move. Typed values are used exactly (no clamping or
+     step snapping). The bench flags sliders that duplicate each other or do
+     nothing, and features pinned by a hard-coded number. A History tab shows
+     each part's branch graph with a drawing per checkpoint.
+2. **Assemblies**: parts join at named connection points computed from their
+   own dimensions, so a resize carries through. Under-defined placement warns.
+   Exports a STEP of the whole assembly and a MuJoCo model.
+3. **Simulation**: MuJoCo, local. Real part specs from datasheets, an
+   animation of the assembly moving, and a verdict on whether the chosen
+   parts can do the job, with the minimum specs that would.
 
 ## License
 
