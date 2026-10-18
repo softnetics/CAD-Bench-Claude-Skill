@@ -1,19 +1,21 @@
 ---
 name: cad-bench
 description: >-
-  Model a mechanical part in Python with an exact CAD kernel, let the user
-  tune its dimensions on an interactive slider page ("CAD Bench") that shows
-  the binding constraints live, and export a verified, printable STL. Handles
-  fillets, chamfers, shells, lofts, sweeps and revolves as real geometry, not
-  approximations. Use whenever the user wants to design, model or 3D-print a
-  part -- bracket, mount, standoff, enclosure, housing, skirt, tray, spacer,
-  adapter, duct, jig, knob, clip, gasket, fixture -- or wants to adjust a
-  part's dimensions against what actually binds (wall thickness, print
-  overhang, clearance, material around a bore) and re-export. Trigger on
-  "make me a bracket", "model a mount for X", "design an enclosure", "round
-  the corners", "hollow it out", "parametric part", "tweak the dimensions and
-  give me an STL", "export to STL", "CAD bench" -- even when no CAD tool is
-  named.
+  Model a mechanical part in Python on an exact CAD kernel, let the user
+  tune dimensions on an interactive slider page ("CAD Bench") showing binding
+  constraints live, and export a verified printable STL. Fillets, chamfers,
+  shells, lofts and sweeps are exact geometry. Use whenever the user wants to
+  design, model or 3D-print a part -- bracket, mount, standoff, enclosure,
+  housing, skirt, tray, spacer, adapter, duct, jig, knob, clip, gasket,
+  fixture -- or adjust its dimensions against what binds (wall thickness,
+  overhang, clearance, material around a bore) and re-export. Also for
+  assemblies and machines: mechanism, robot chassis, joints, hinge, motor
+  mount, wheel and shaft, exported as a STEP assembly and a
+  MuJoCo/simulation-ready model. Trigger on "make me a bracket", "model a
+  mount for X", "design an enclosure", "round the corners", "hollow it out",
+  "parametric part", "tweak the dimensions and give me an STL", "export to
+  STL", "CAD bench", "put these parts together", "assembly" -- even when no
+  CAD tool is named.
 ---
 
 # cad-bench
@@ -51,7 +53,8 @@ reopens) `cad/` there:
 
 ```
 cad/parts/            <name>.py, <name>.params.json, <name>.recipe.js
-cad/assemblies/
+cad/assemblies/       <name>.py: parts joined into a machine (see Assemblies)
+cad/rules/            <kind>.rules: confirmed rules for this project
 cad/exports/          STL / STEP / drawings -- rebuilt on demand, never versioned
 cad/.cad-bench.json   per-project settings (auto-checkpoint)
 ```

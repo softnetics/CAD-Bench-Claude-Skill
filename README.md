@@ -166,8 +166,11 @@ asm.use_rules("wheel hub", wheel="wheel_l", shaft="motor_l")
 asm.run()
 ```
 
+In a project the file lives in `cad/assemblies/`; Claude runs it with
+`python scripts/cad.py assemble balance_bot`, which prints one line:
+
 ```
-balance_bot: 5 parts, 4 joints, 4/4 rules ok -> models\exports\balance_bot
+balance_bot: 5 parts, 4 joints, 4/4 rules ok -> cad\exports\balance_bot
 ```
 
 - **Rules, confirmed by you.** Before resizing, Claude writes down what a
@@ -224,7 +227,14 @@ cad-bench/
 │   │                           real Python/OCCT model -- volume + bbox, at
 │   │                           every slider extreme
 │   ├── cad.py                  the plain-word CLI: init, checkpoint, try, revert,
-│   │                           keep, back/forward, auto, history, serve, sense, drawing
+│   │                           keep, back/forward, auto, history, serve, sense,
+│   │                           drawing, assemble
+│   ├── assembly.py             connectors, joins, placement and the warn-only checks
+│   ├── rules.py                confirmed rules that set and check sizes across parts
+│   ├── asm_export.py           runs an assembly: report, picture, STEP, MuJoCo model
+│   ├── asm_render.py           the assembly picture with connector markers
+│   ├── mjcf.py                 the MuJoCo model, checked to load and step
+│   ├── build_skill_bundle.py   rebuilds cad-bench.skill (the one-file install)
 │   ├── cadproj.py              a project's cad/ folder: layout and settings
 │   ├── cadvc.py                git-backed checkpoints and experiments, cad/ only
 │   ├── bench_server.py         the live bench: warm kernel + JSON API on 127.0.0.1
@@ -246,12 +256,15 @@ cad-bench/
 │   ├── stl-reverse-engineering.md  method for turning a loose STL into a model,
 │   │                           including fitting a MATING surface (§6) and the
 │   │                           solid-vs-shell construction decision
-│   └── live-mesh-preview.md    when a live 3D preview is worth building, the
-│                                mesh(p,THREE,CSG) contract, how to verify it
+│   ├── live-mesh-preview.md    when a live 3D preview is worth building, the
+│   │                           mesh(p,THREE,CSG) contract, how to verify it
+│   └── assembly.md             connectors, joins, rules, checks, STEP / MuJoCo
 ├── models/                     worked, runnable examples
 │   ├── boss_plate.py             — plain prismatic: plate, bosses, bores
 │   ├── enclosure.py              — fillet → shell → chamfer, internal bosses, a port
 │   ├── duct.py                   — loft: round-to-rectangular transition
+│   ├── balance_bot.py            — assembly: chassis, two motors, two wheels
+│   │   (bb_*.py parts, rules/wheel-hub.rules)
 │   └── _parity_demo.py/.recipe.js  — check_mesh_parity.py's own test
 │                                fixture (a box with a bore), not a real part
 ├── assets/
@@ -264,7 +277,7 @@ cad-bench/
 
 Fillets, chamfers, shells and lofts are **exact geometry**, not a faceted
 guess — that's the entire point of building on a real kernel instead of mesh
-CSG. What it *can't* do yet: assemblies with mates (planned, see below), thread modelling, sheet-metal
+CSG. What it *can't* do yet: thread modelling, sheet-metal
 unfolding, FEA, sculpted/organic shapes (a character model, anything with
 continuously varying freeform curvature — there's no feature tree to
 recover), or file formats other than STL/STEP. If you need those, this
@@ -272,9 +285,11 @@ skill will tell you so rather than quietly hand you something wrong.
 
 ## Where it's heading
 
-Three steps, in order. Step 1 is available now; steps 2 and 3 are planned.
-The design for step 1 is in
-[`docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md).
+Three steps, in order. Steps 1 and 2 are available now; step 3 is planned.
+The designs are in
+[`docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-foundation-design.md)
+and
+[`docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md).
 
 1. **Foundation** — *available*
    - **Your parts live with your project, not in the skill.** Invoking the
@@ -283,7 +298,8 @@ The design for step 1 is in
      ```
      <your project>/cad/
        parts/        <name>.py, <name>.params.json, <name>.recipe.js
-       assemblies/   (step 2)
+       assemblies/   <name>.py: parts joined into a machine (step 2)
+       rules/        <kind>.rules: confirmed rules that carry sizes between parts
        exports/      STL / STEP / drawings, rebuilt on demand, not versioned
      ```
      `models/` in this repo stays as worked examples only.
@@ -313,13 +329,24 @@ The design for step 1 is in
    python scripts/cad.py serve                the live bench, on 127.0.0.1
    python scripts/cad.py sense <part>         redundant / no-effect / hard-coded flags
    python scripts/cad.py drawing <part>       exact views to cad/exports/<part>.svg
+   python scripts/cad.py assemble <name>      run cad/assemblies/<name>.py: report,
+                                              picture, STEP, MuJoCo model
    python scripts/new_part.py --project DIR --name <part> --params "a=1,b=2"
    ```
 
-2. **Assemblies**: parts join at named connection points computed from their
-   own dimensions, so a resize carries through. Under-defined placement warns.
-   Exports a STEP of the whole assembly and a MuJoCo model.
-3. **Simulation**: MuJoCo, local. Real part specs from datasheets, an
+2. **Assemblies** — *available* (see [Assemblies](#assemblies) above)
+   - Parts join at named connection points computed from their own
+     dimensions, so a resize carries through. Under-defined placement,
+     overlaps, hard-coded connectors and broken rules warn.
+   - Rules you confirm carry sizes between parts (the wheel bore follows the
+     motor shaft), per project in `cad/rules/` or worldwide.
+   - Exports a placement report, a picture with connector markers, a STEP of
+     the whole assembly, and a MuJoCo model that is checked to load and step.
+   ```
+   python scripts/cad.py assemble <name>      run cad/assemblies/<name>.py
+   python scripts/rules.py list <assembly.py> the saved rule kinds, one line
+   ```
+3. **Simulation** — *planned*: MuJoCo, local. Real part specs from datasheets, an
    animation of the assembly moving, and a verdict on whether the chosen
    parts can do the job, with the minimum specs that would.
 
