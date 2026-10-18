@@ -330,8 +330,8 @@ Several parts joined into a machine (a robot chassis, a mechanism). Lookup:
    1.5 × shaft Ø"). Get the user's OK, then ask **project only or
    worldwide**. Save as a `.rules` file in `cad/rules/` (project) or
    `<skill>/library/rules/` (worldwide; git-ignored, never committed unless
-   the user explicitly contributes it). Only files with a `confirmed:` line
-   are used. For a new part, `python scripts/rules.py list <assembly.py>`
+   the user explicitly contributes it). Only files whose `confirmed:` is a
+   date (`2026-10-18`) or `true` are used. For a new part, `python scripts/rules.py list <assembly.py>`
    shows the saved kinds; propose matching rules and wait for a yes before
    applying them.
 2. **Connectors on each part**, computed from its parameters, next to

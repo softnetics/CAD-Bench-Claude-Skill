@@ -4,15 +4,19 @@
 One plain-text file per kind of part:
 
     kind: wheel hub
-    purpose: A wheel pressed onto a motor shaft; carries the robot's weight.
+    purpose: A wheel pressed straight onto a motor shaft; it carries the robot's weight and the motor's torque.
     roles: wheel, shaft
     confirmed: 2026-10-18
-    rule: wheel.bore_d = shaft.shaft_d + 0.1     # printed holes shrink: presses on
-    rule: shaft.shaft_len >= wheel.hub_len       # the shaft reaches through the hub
+    rule: wheel.bore_d = shaft.shaft_d + 0.1      # printed holes come out about 0.1 small, so this presses on
+    rule: wheel.hub_len >= 1.5 * shaft.shaft_d    # enough hub length to grip the shaft
 
-`=` rules SET a parameter before anything is built, so a size change carries
-through; `>=`, `<=`, `>`, `<`, `==` rules are CHECKED (a break warns, export
-still happens). A file with no `confirmed:` line is ignored.
+(the shipped models/rules/wheel-hub.rules). `=` rules SET a parameter before
+anything is built, so a size change carries through; `>=`, `<=`, `>`, `<`,
+`==` rules are CHECKED (a break warns, export still happens).
+
+Only a file whose `confirmed:` is a date (YYYY-MM-DD) or `true` is used. With
+no `confirmed:` line or any other value (`no`, `pending`) its rules are
+ignored and counted; a value that is neither is also named in one warning.
 
 Scopes: project rules in `cad/rules/` (or `<assembly dir>/rules/` outside a
 project), worldwide rules in `<skill>/library/rules/` -- git-ignored, because
@@ -23,8 +27,10 @@ the installed skill is a clone of a public repo. Project wins over worldwide.
 from __future__ import annotations
 
 import ast
+import datetime
 import math
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +75,27 @@ class RuleResult:
 
 
 # ------------------------------------------------------------------ files
+
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def is_confirmed(value):
+    """True for an ISO date (YYYY-MM-DD) or literal true; anything else is unconfirmed."""
+    if value is True:
+        return True
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    if v.lower() == "true":
+        return True
+    if not _ISO_DATE.fullmatch(v):
+        return False
+    try:
+        datetime.date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
 
 def load_rule_file(path):
     path = Path(path)
@@ -229,8 +256,9 @@ def apply(rules, params, derive, given=None):
             if name in params[inst]:
                 if (inst, name) in targets:
                     out.add((inst, name))
-            else:                       # a derived value: depends on every set of inst
-                out |= {t for t in targets if t[0] == inst}
+            else:                       # a derived value: the targets it really reads
+                out |= {t for t in targets if t[0] == inst
+                        and _derived_reads(derive, inst, params[inst], name, t[1])}
         return out
 
     graph = {tuple(t): deps(e, r.text) for r, t, e in sets}
@@ -267,6 +295,12 @@ def apply(rules, params, derive, given=None):
     for inst, p in order:
         r, e = by_target[(inst, p)]
         v = _eval(e, lookup, r.text)
+        old = params[inst][p]
+        if isinstance(old, int) and not isinstance(old, bool):
+            if not math.isclose(v, round(v), abs_tol=1e-9):
+                raise RuleError(f"rule {r.text!r}: {inst}.{p} is a whole number "
+                                f"but the rule gives {v:g}")
+            v = int(round(v))
         params[inst][p] = v
         results.append(RuleResult(r, True, v, v, "="))
     for r, _, cmp in checks:
@@ -277,33 +311,71 @@ def apply(rules, params, derive, given=None):
     return results
 
 
+def _derived_reads(derive, inst, P, name, param, nudge=0.02):
+    """Whether derived value `name` changes when `param` does (sensed, like sense.py).
+
+    When that can't be told (a non-numeric parameter, a derive() that fails)
+    it counts as reading it.
+    """
+    v = P.get(param)
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return True
+    step = max(abs(v) * nudge, 0.05)
+    try:
+        base = derive(inst, dict(P)).get(name)
+        for delta in (step, -step):
+            Q = dict(P)
+            Q[param] = v + delta
+            if derive(inst, Q).get(name) != base:
+                return True
+    except Exception:
+        return True
+    return False
+
+
 # ------------------------------------------------------------------ assembly hook
 
 def apply_assembly(asm):
-    """Collect the assembly's confirmed rules, apply them to its instances' P."""
-    rules, ignored = [], 0
+    """Collect the assembly's confirmed rules, apply them to its instances' P.
+
+    Returns (results, count of unconfirmed rules ignored, warnings); warnings
+    is at most one line naming each `confirmed` value that is neither a date
+    nor true.
+    """
+    rules, ignored, bad = [], 0, {}
+
+    def unconfirmed(source, value, n):
+        nonlocal ignored
+        ignored += n
+        if value not in (None, False, ""):
+            bad.setdefault(f"{source} (confirmed: {value!r})", None)
+
     for text, why, confirmed, source in asm.rule_specs:
-        if confirmed:
+        if is_confirmed(confirmed):
             rules.append(Rule(text, why, source))
         else:
-            ignored += 1
+            unconfirmed(source, confirmed, 1)
     pdir, wdir = project_rules_dir(asm.path), world_rules_dir()
     for kind, roles in asm.rule_kinds:
         rf = find_kind(kind, pdir, wdir)
         if rf is None:
             raise RuleError(f"no rule file of kind {kind!r} in {pdir} or {wdir}")
-        if not rf.confirmed:
-            ignored += len(rf.rules)
+        if not is_confirmed(rf.confirmed):
+            unconfirmed(rf.path.name, rf.confirmed, len(rf.rules))
             continue
         for r in rf.rules:
             rules.append(Rule(bind(r.text, roles), r.why, rf.path.name))
+    warnings = []
+    if bad:
+        warnings.append("rules not confirmed, ignored (confirm with a date YYYY-MM-DD "
+                        "or true): " + ", ".join(bad))
     if not rules:
-        return [], ignored
+        return [], ignored, warnings
     insts = asm.instances
     params = {n: i.P for n, i in insts.items()}
     given = {n: set(i.params) for n, i in insts.items()}
     results = apply(rules, params, lambda n, P: insts[n].model.derive(P), given)
-    return results, ignored
+    return results, ignored, warnings
 
 
 # ------------------------------------------------------------------ CLI
@@ -316,7 +388,7 @@ def _describe(folder):
         except RuleError:
             names.append(f"{f.name} (unreadable)")
             continue
-        names.append(rf.kind + ("" if rf.confirmed else " (unconfirmed)"))
+        names.append(rf.kind + ("" if is_confirmed(rf.confirmed) else " (unconfirmed)"))
     return ", ".join(names) or "none"
 
 

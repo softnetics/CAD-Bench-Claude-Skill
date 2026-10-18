@@ -217,3 +217,44 @@ def test_hinge_sense_and_limits_do_not_depend_on_which_part_is_placed_first(tmp_
     assert np.allclose(_turn_axis(turn1), (1, 0, 0), atol=1e-9)
     assert np.allclose(_turn_axis(turn2), (1, 0, 0), atol=1e-9)
     assert np.allclose(turn2, turn1, atol=1e-9)
+
+
+def test_unknown_material_is_fine_when_mass_is_given(tmp_path):
+    import asm_export
+    asm = A.Assembly("m", path=project(tmp_path))
+    asm.add("body", part="block", material="unobtainium", mass=0.2)
+    solved = asm.solve()
+    mass, com, inertia, source = asm_export.mass_properties(solved.instances["body"])
+    assert mass == pytest.approx(0.2) and np.allclose(com, (0, 0, 5))
+    assert inertia[0, 0] > 0 and "mass given" in source
+    asm = A.Assembly("m", path=project(tmp_path))
+    asm.add("body", part="block", material="unobtainium")
+    with pytest.raises(A.AssemblyError, match="unobtainium"):
+        asm_export.mass_properties(asm.solve().instances["body"])
+
+
+ERRORS = {
+    "rule": 'asm.rule("body.nope = 1", confirmed=True)',
+    "kind": 'asm.use_rules("gearbox", a="body")',
+    "mjcf": "",                                    # the export's load check fails
+}
+
+
+@pytest.mark.parametrize("what", sorted(ERRORS))
+def test_assembly_cli_turns_errors_into_one_line(tmp_path, capsys, monkeypatch, what):
+    import mjcf
+
+    def broken(path):
+        raise mjcf.MJCFError("e.xml does not load in mujoco: boom\nsecond line")
+    if what == "mjcf":
+        monkeypatch.setattr(mjcf, "check", broken)
+    path = project(tmp_path)
+    path.write_text("\n".join([
+        "import assembly as A",
+        f"asm = A.Assembly('e', path={str(path)!r})",
+        "asm.add('body', part='block')",
+        ERRORS[what],
+        "asm.run(quiet=True)", ""]))
+    assert A.main([str(path)]) == 1
+    err = capsys.readouterr().err.strip().splitlines()
+    assert len(err) == 1 and err[0].startswith("assembly: "), err

@@ -22,7 +22,7 @@ def connectors(P):
 WHEEL = '''
 import brep as B
 import assembly as A
-PARAMS = {"tyre_d": 40.0, "w": 6.0, "bore_d": 2.0, "hub_len": 10.0}
+PARAMS = {"tyre_d": 40.0, "w": 6.0, "bore_d": 2.0, "hub_len": 10.0, "spokes": 5}
 def derive(P):
     d = dict(P); d["wall"] = (P["tyre_d"] - P["bore_d"]) / 2; return d
 def build(P):
@@ -213,3 +213,80 @@ def test_list_cli_one_line(proj, capsys):
     assert R.main(["list", str(proj / "t.py")]) == 0
     out = capsys.readouterr().out.strip().splitlines()
     assert out == ["rules: project: wheel hub; worldwide: motor mount (unconfirmed)"]
+
+
+# ---------------------------------------------------------------- confirmed
+
+@pytest.mark.parametrize("value", ["no", "pending", "yes", "2026-13-45", "18/10/2026"])
+def test_confirmed_must_be_a_date_or_true(proj, value):
+    (proj / "rules" / "hub.rules").write_text(
+        HUB_RULES.replace("confirmed: 2026-10-18", f"confirmed: {value}"))
+    asm = asm_of(proj)
+    asm.use_rules("wheel hub", wheel="wheel", shaft="motor")
+    asm.rule("wheel.w = 9", confirmed=value)
+    s = asm.solve()
+    assert asm.instances["wheel"].P["bore_d"] == 2.0 and asm.instances["wheel"].P["w"] == 6.0
+    assert s.rule_results == [] and s.rules_ignored == 3
+    notes = [w for w in s.warnings if "confirmed" in w]
+    assert len(notes) == 1, s.warnings
+    assert "hub.rules" in notes[0] and "t.py (inline)" in notes[0] and value in notes[0]
+
+
+@pytest.mark.parametrize("value", ["2026-10-18", "true", "True"])
+def test_a_date_or_true_confirms_a_file(proj, value):
+    (proj / "rules" / "hub.rules").write_text(
+        HUB_RULES.replace("confirmed: 2026-10-18", f"confirmed: {value}"))
+    asm = asm_of(proj)
+    asm.use_rules("wheel hub", wheel="wheel", shaft="motor")
+    asm.rule("wheel.w = 9", confirmed=True)
+    asm.rule("wheel.tyre_d = 50", confirmed="2026-10-18")
+    s = asm.solve()
+    assert asm.instances["wheel"].P["bore_d"] == pytest.approx(3.1)
+    assert asm.instances["wheel"].P["w"] == 9 and asm.instances["wheel"].P["tyre_d"] == 50
+    assert s.rules_ignored == 0 and not [w for w in s.warnings if "confirmed" in w]
+
+
+def test_list_marks_a_bad_confirmed_value_unconfirmed(proj, capsys):
+    (proj / "rules" / "hub.rules").write_text(
+        HUB_RULES.replace("confirmed: 2026-10-18", "confirmed: no"))
+    assert R.main(["list", str(proj / "t.py")]) == 0
+    assert "wheel hub (unconfirmed)" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- values
+
+def test_int_parameter_stays_int(proj):
+    asm = asm_of(proj)
+    asm.rule("wheel.spokes = motor.shaft_d + 3", confirmed=True)
+    asm.solve()
+    v = asm.instances["wheel"].P["spokes"]
+    assert v == 6 and type(v) is int
+
+
+def test_int_parameter_set_to_a_fraction_is_an_error(proj):
+    asm = asm_of(proj)
+    asm.rule("wheel.spokes = motor.shaft_d / 2", confirmed=True)
+    with pytest.raises(R.RuleError, match="wheel.spokes.*whole number"):
+        asm.solve()
+
+
+def test_reading_an_unrelated_derived_value_of_the_same_part_is_not_a_cycle(proj):
+    asm = asm_of(proj)
+    asm.rule("wheel.hub_len = wheel.wall", confirmed=True)   # wall = (tyre_d - bore_d) / 2
+    asm.solve()
+    assert asm.instances["wheel"].P["hub_len"] == pytest.approx(19.0)
+
+
+def test_derived_value_that_reads_the_target_is_a_cycle(proj):
+    asm = asm_of(proj)
+    asm.rule("wheel.bore_d = wheel.wall - 10", confirmed=True)
+    with pytest.raises(R.RuleError, match="cycle"):
+        asm.solve()
+
+
+def test_docstring_example_matches_the_shipped_rule_file():
+    shipped = R.load_rule_file(R.SKILL_ROOT / "models" / "rules" / "wheel-hub.rules")
+    doc = [ln.strip() for ln in R.__doc__.splitlines()]
+    example = [ln.split(":", 1)[1].split("#")[0].strip() for ln in doc if ln.startswith("rule:")]
+    assert example == [r.text for r in shipped.rules]
+    assert f"purpose: {shipped.purpose}" in doc

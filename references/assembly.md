@@ -123,8 +123,12 @@ rule: wheel.hub_len >= 1.5 * shaft.shaft_d    # enough hub to grip
   `max`, `abs`, `sqrt`.
 - A parameter set by a rule must not also be in `add(params=)` (error).
   Cycles are an error.
-- No `confirmed:` line → the whole file is ignored, and the summary says
-  how many rules were.
+- `confirmed:` must be a date (`2026-10-18`) or `true`. No `confirmed:`
+  line, or any other value (`no`, `pending`) → the whole file is ignored,
+  and the summary says how many rules were; a value that is neither a date
+  nor `true` is also named in one `warn:` line.
+- A rule that sets a whole-number parameter (`teeth: 12`) keeps it whole; a
+  fractional result is an error.
 - One-off rule in the assembly: `asm.rule("a.x >= b.y + 2", why="...", confirmed="2026-10-18")`.
 
 **Where rule files live:**

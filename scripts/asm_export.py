@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 import brep as B
-from assembly import MOTION_NAMES, Solved  # noqa: F401  (re-exported for callers)
+from assembly import MOTION_NAMES, AssemblyError, Solved  # noqa: F401  (Solved re-exported)
 
 DENSITY = {"PLA": 1.24, "PETG": 1.27, "ABS": 1.04, "aluminium": 2.70,
            "aluminum": 2.70, "steel": 7.85}       # g/cm^3
@@ -33,8 +33,10 @@ def mass_properties(inst):
     """(mass kg, com mm in part frame, inertia 3x3 kg·mm² about com, source)."""
     rho = DENSITY.get(inst.material)
     if rho is None:
-        raise ValueError(f"{inst.name}: unknown material {inst.material!r} "
-                         f"(have {', '.join(DENSITY)}); or give mass=")
+        if inst.mass is None:
+            raise AssemblyError(f"{inst.name}: unknown material {inst.material!r} "
+                                f"(have {', '.join(DENSITY)}); or give mass=")
+        rho = 1.0                     # any density: mass= rescales mass and inertia
     kg_per_mm3 = rho * 1e-6
     shape = inst.shape
     vol = shape.volume if shape.solids() else 0.0

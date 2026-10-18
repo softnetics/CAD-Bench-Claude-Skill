@@ -332,7 +332,7 @@ class Assembly:
         if not self.instances:
             raise AssemblyError("assembly has no parts")
         self._resolve_params()
-        rule_results, ignored = self._apply_rules()
+        rule_results, ignored, rule_notes = self._apply_rules()
         for inst in self.instances.values():
             inst.shape = inst.model.build(dict(inst.P))
             fn = getattr(inst.model, "connectors", None)
@@ -341,7 +341,7 @@ class Assembly:
             for end in (j.a, j.b):
                 self._connector(end)
 
-        warnings = []
+        warnings = list(rule_notes)
         placements, edges = self._place(warnings)
         solved = Solved(self, self.instances, placements, edges, warnings,
                         rule_results, ignored)
@@ -542,15 +542,39 @@ def _sense_connectors(model, P, numeric):
 
 # ------------------------------------------------------------------ CLI
 
+def _errors():
+    import mjcf
+    import rules
+    return (AssemblyError, rules.RuleError, mjcf.MJCFError)
+
+
+def error_line(e):
+    """One line for an assembly, rule or MuJoCo-export error."""
+    msg = str(e).splitlines()[0] if str(e) else type(e).__name__
+    return f"assembly: {msg}"
+
+
+def run_file(path):
+    """Run an assembly file as `python <file>` would, with the scripts dir on the path."""
+    scripts = os.path.dirname(os.path.abspath(__file__))
+    os.environ.setdefault("CAD_BENCH_SCRIPTS", scripts)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    runpy.run_path(str(path), run_name="__main__")
+
+
+ASSEMBLY_ERRORS = _errors()
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 1:
         print("usage: assembly.py ASSEMBLY.py", file=sys.stderr)
         return 2
     try:
-        runpy.run_path(argv[0], run_name="__main__")
-    except AssemblyError as e:
-        print(f"assembly: {e}", file=sys.stderr)
+        run_file(argv[0])
+    except ASSEMBLY_ERRORS as e:
+        print(error_line(e), file=sys.stderr)
         return 1
     return 0
 
