@@ -66,6 +66,13 @@ def test_parts_listing(bench):
     assert 'label:"Spacer"' in spacer["recipe_js"]
 
 
+def test_parts_listing_carries_current_values(bench):
+    p, url = bench
+    assert get(url, "/api/parts")[0]["values"] == {"w": 40.0, "t": 3.0}
+    (p.parts / "spacer.params.json").write_text('{"t": 0.43}', encoding="utf-8")
+    assert get(url, "/api/parts")[0]["values"] == {"w": 40.0, "t": 0.43}
+
+
 def test_build_returns_views_fast(bench):
     _, url = bench
     first = post(url, "/api/build", {"part": "spacer", "params": {"w": 40, "t": 3}, "seq": 1})

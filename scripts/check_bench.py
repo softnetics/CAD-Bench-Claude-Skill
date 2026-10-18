@@ -9,7 +9,8 @@ sliders trying to fix a typo. This catches that class before publishing.
 
     python scripts/check_bench.py assets/bench-template.html
 
-For each part it evaluates derive/cards/checks/draw at the default values,
+For each part it evaluates derive/cards/checks (and draw, when the recipe has
+one -- the live bench needs none) at the default values,
 then sweeps every slider to its min and its max. Reports NaN, non-boolean
 check verdicts, and exceptions. Exits non-zero if anything failed.
 
@@ -305,7 +306,10 @@ try {
             if (where === 'defaults') rec.checks = rows.length,
                                       rec.failing = rows.filter(r=>!r[0]).map(r=>r[1]);
           } catch (e) { rec.problems.push(where + ': checks threw ' + e.message); }
-          try {
+          // draw() is optional: the live bench draws kernel views instead,
+          // so a recipe without one skips the SVG and layout checks.
+          if (typeof P.draw !== 'function') { if (where === 'defaults') rec.svg = 'none'; }
+          else try {
             const svg = P.draw(p, d);
             if (String(svg).includes('NaN'))
               rec.problems.push(where + ': draw() emitted NaN into the SVG');

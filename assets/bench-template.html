@@ -50,7 +50,8 @@
           background:var(--paper);border:1px solid var(--rule);border-radius:4px;
           padding:3px 6px}
   .numbox:focus-visible{outline:2px solid var(--part-line);outline-offset:1px}
-  .numbox.clamped{border-color:var(--warn)}
+  .numbox.outside{border-color:var(--warn)}
+  .hint{grid-column:1/-1;margin-top:-3px;font-size:11.5px;color:var(--warn);text-align:right}
   input[type=range]{width:100%;accent-color:var(--part-line);background:transparent}
   input[type=range]:focus-visible{outline:2px solid var(--part-line);outline-offset:3px}
   .stage{background:var(--panel);border:1px solid var(--rule);border-radius:6px;
@@ -202,9 +203,6 @@ const ci=(x,y,r,a)=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${Math
 const ln=(x1,y1,x2,y2)=>`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--rule)" stroke-width="1" stroke-dasharray="4 4"/>`;
 const tx=(x,y,s,sz)=>`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${sz||11}" fill="var(--ink-2)" font-family="IBM Plex Sans,sans-serif">${s}</text>`;
 const cap=(x,y,s)=>`<text x="${x}" y="${y}" font-size="11" fill="var(--ink-2)" letter-spacing="1.4">${s}</text>`;
-// Decimal places implied by a slider's own step (0.1 -> 1, 0.05 -> 2, 1 -> 0).
-// The typed-value box rounds to this, so retyping what's on screen is a no-op.
-const stepDecimals=(step)=>{ const s=String(step), i=s.indexOf("."); return i<0?0:s.length-i-1; };
 
 // ============================================================
 // PARTS -- one entry per part. Add a new key for each new part; keep the
@@ -453,7 +451,56 @@ function askLeaveConfirm(){
 }
 const el=id=>document.getElementById(id);
 const P=()=>PARTS[KEY];
-const vals=()=>{const o={}; P().params.forEach(q=>o[q.id]=parseFloat(el(q.id).value)); return o;};
+// <value-store>
+// VALUES[partKey][paramId] is the source of truth for every parameter; the
+// slider only displays it. A typed or pasted number is used EXACTLY (no
+// clamp to the slider's range, no snap to its step); the slider just shows
+// the nearest position it can. Identical in bench-template.html and
+// live-bench.html -- tests/js/numbox.test.mjs runs this block from both.
+// Needs from the page: KEY (current part), P() (its recipe, with .params)
+// and el(id) (the slider element whose id is the param id).
+const VALUES = {};
+const valueStore = () => VALUES[KEY] || (VALUES[KEY] = {});
+const vals = () => { const s = valueStore(), o = {}; P().params.forEach(q => o[q.id] = s[q.id]); return o; };
+const sliderPos = (q, v) => Math.min(q.max, Math.max(q.min, v));
+const outsideSlider = (q, v) => v < q.min || v > q.max;
+// "12.5", " 12.5 mm", "-3", "1e-2", "45°" -> number; anything else -> NaN.
+function parseTyped(raw) {
+  const s = String(raw).trim().replace(/\s*(mm|°|deg)$/i, "");
+  return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s) ? Number(s) : NaN;
+}
+// Store v exactly; park the slider at the closest position it has.
+function setValue(q, v) {
+  valueStore()[q.id] = v;
+  el(q.id).value = String(sliderPos(q, v));
+}
+// Slider `input`: the slider's own (stepped) value becomes the value.
+function setFromSlider(q) { valueStore()[q.id] = parseFloat(el(q.id).value); }
+// Numbox commit: true if `raw` parsed and was stored, false (value unchanged) if not.
+function setTyped(q, raw) {
+  const n = parseTyped(raw);
+  if (!Number.isFinite(n)) return false;
+  setValue(q, n);
+  return true;
+}
+// A pasted `const NAME = value * MM;` block, matched to params by their `fs`
+// name. Returns {loaded, outside, other}: names applied, the subset outside
+// their slider's range (applied anyway), and names this part does not drive.
+function applyPasted(text) {
+  const byFs = {}; P().params.forEach(q => { if (q.fs) byFs[q.fs] = q; });
+  const loaded = [], outside = [], other = [];
+  const re = /const\s+(\w+)\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*(?:\*\s*(?:MM|DEG)\b)?\s*(?=;|$)/gim;
+  for (const [, name, num] of String(text).matchAll(re)) {
+    const q = byFs[name];
+    if (!q) { other.push(name); continue; }
+    const v = Number(num);
+    setValue(q, v);
+    loaded.push(name);
+    if (outsideSlider(q, v)) outside.push(name);
+  }
+  return { loaded, outside, other };
+}
+// </value-store>
 const fmt=(n,d=2)=>Number(n.toFixed(d)).toString();
 
 // ---- Home page: just names. Clicking one opens a read-only preview, not
@@ -517,6 +564,16 @@ function setLocked(id, val){
   }catch(e){}
 }
 
+// Where a slider starts when its part opens: a locked one always shows the
+// requirement's own value, ignoring any stale saved override from a previous
+// unlocked session -- the point of locking is that this number is not a free
+// choice. Otherwise the last hand-off snapshot, else the part's default.
+function startValue(q){
+  if(isLocked(q)) return q.val;
+  let saved=null; try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}")[KEY]||{})[q.id]; }catch(e){}
+  return saved!==undefined && saved!==null ? Number(saved) : q.val;
+}
+
 function buildControls(){
   const groups=[];
   P().params.forEach(q=>{ if(!groups.includes(q.g)) groups.push(q.g); });
@@ -524,21 +581,18 @@ function buildControls(){
     `<div class="group"><div class="glabel">${g}</div>` +
     P().params.filter(q=>q.g===g).map(q=>{
       const locked=isLocked(q);
-      let saved=null; try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}")[KEY]||{})[q.id]; }catch(e){}
-      // Locked always shows the requirement's own value, ignoring any
-      // stale saved override from a previous unlocked session -- the
-      // point of locking is that this number is not a free choice.
-      const v = locked ? q.val : (saved!==undefined && saved!==null ? saved : q.val);
       const lockBtn = q.locked===undefined ? "" :
         ` <button type="button" class="lockbtn" data-lockid="${q.id}" `+
         `title="${(locked?"Locked to a requirement — click to override: ":"Click to re-lock: ")
           +(q.lockNote||"fixed value")}">${locked?"\u{1F512}":"\u{1F513}"}</button>`;
       return `<div class="row${locked?" locked":""}"><label for="${q.id}">${q.label}${lockBtn}</label>`+
-        `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}" value="${v}"${locked?" disabled":""}>`+
-        `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"${locked?" disabled":""}></div>`;
+        `<input type="range" id="${q.id}" min="${q.min}" max="${q.max}" step="${q.step}"${locked?" disabled":""}>`+
+        `<input type="text" inputmode="decimal" class="numbox" id="o_${q.id}" aria-label="${q.label} value"${locked?" disabled":""}>`+
+        `<div class="hint" id="h_${q.id}" hidden></div></div>`;
     }).join("") + `</div>`).join("");
   P().params.forEach(q=>{
-    el(q.id).addEventListener("input", ()=>{ DIRTY=true; render(); });
+    setValue(q, startValue(q));
+    el(q.id).addEventListener("input", ()=>{ setFromSlider(q); DIRTY=true; render(); });
     const box=el("o_"+q.id);
     box.addEventListener("change", ()=>commitNumbox(q));
     box.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); box.blur(); } });
@@ -553,36 +607,31 @@ function buildControls(){
   el("note").textContent = P().note;
 }
 
-// Typed value: clamp to the slider's own [min,max], then snap to the same
-// step grid the slider itself sits on (multiples of `step` from `min` --
-// verified empirically: assigning an off-grid value to a range input's
-// .value gets silently re-snapped by the browser, so rounding to the
-// step's decimal WIDTH alone (e.g. 0.5 -> 1 decimal) isn't enough --
-// 17.3 on a step-0.5 slider still lands on 17.5, not 17.3). Then push the
-// snapped value back onto the slider and re-render. An unparseable entry
-// (empty, "abc") just reverts to the slider's current value.
+// Typed value: used exactly -- no clamp to the slider's range, no snap to its
+// step (the slider just shows the nearest position it has; showValue() adds
+// an "outside slider range" hint). An unparseable entry (empty, "abc")
+// reverts the box to the stored value.
 function commitNumbox(q){
-  const box=el("o_"+q.id);
-  const raw=parseFloat(box.value);
-  const n=Number.isFinite(raw)?raw:parseFloat(el(q.id).value);
-  const boundedRaw=Math.min(q.max, Math.max(q.min, n));
-  const steps=Math.round((boundedRaw-q.min)/q.step);
-  const snapped=Number(Math.min(q.max, Math.max(q.min, q.min+steps*q.step))
-    .toFixed(stepDecimals(q.step)));
-  box.classList.toggle("clamped", Number.isFinite(raw) && Math.abs(snapped-raw)>1e-9);
-  el(q.id).value=snapped;
-  DIRTY=true;
+  if(setTyped(q, el("o_"+q.id).value)) DIRTY=true;
+  showValue(q, vals()[q.id], true);
   render();
-  setTimeout(()=>box.classList.remove("clamped"), 900);
+}
+
+// The box shows the real value (String(v): no rounding), plus a hint when it
+// lies outside what the slider can show. `force` writes the box even while it
+// has focus (a commit); render() leaves a box being typed in alone.
+function showValue(q, v, force){
+  const box=el("o_"+q.id), hint=el("h_"+q.id), out=outsideSlider(q, v);
+  if(force || document.activeElement!==box)
+    box.value = String(v) + (q.u==="DEG"?"°":(q.u?" mm":""));
+  box.classList.toggle("outside", out);
+  hint.hidden = !out;
+  hint.textContent = out ? `outside slider range ${q.min}–${q.max}` : "";
 }
 
 function render(){
   const part=P(), p=vals(), d=part.derive(p);
-  part.params.forEach(q=>{
-    const box=el("o_"+q.id);
-    if(document.activeElement!==box)   // don't fight the user mid-type
-      box.value = fmt(p[q.id], stepDecimals(q.step)) + (q.u==="DEG"?"°":(q.u?" mm":""));
-  });
+  part.params.forEach(q=>showValue(q, p[q.id]));
   el("dwg").innerHTML = part.draw(p,d);
   el("derived").innerHTML = part.cards(d).map(([k,x])=>
     `<div class="d"><span>${k}</span><b>${x}</b></div>`).join("");
@@ -597,8 +646,8 @@ function render(){
       `<em>${note}</em></div>`;
   }).join("");
   el("consts").textContent = part.params.filter(q=>q.fs)
-    .map(q=>q.u?`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])} * ${q.u};`
-              :`const ${q.fs.padEnd(18)} = ${fmt(p[q.id])};`).join("\n")
+    .map(q=>q.u?`const ${q.fs.padEnd(18)} = ${p[q.id]} * ${q.u};`
+              :`const ${q.fs.padEnd(18)} = ${p[q.id]};`).join("\n")
     + `\n// ${part.file}`;
 }
 
@@ -625,8 +674,7 @@ function revertToLastHandoff(){
   try{ saved=(JSON.parse(localStorage.getItem("cadbench")||"{}"))[KEY]; }catch(e){}
   P().params.forEach(q=>{
     if(isLocked(q)) return;   // locked sliders are never a user edit to revert
-    const v = saved && saved[q.id]!==undefined ? saved[q.id] : q.val;
-    el(q.id).value = v;
+    setValue(q, saved && saved[q.id]!==undefined ? Number(saved[q.id]) : q.val);
   });
   render();
 }
@@ -636,25 +684,16 @@ el("paste").addEventListener("input",()=>say(""));
 el("load").addEventListener("click",()=>{
   const raw=el("paste").value;
   if(!raw.trim()){ say("Paste a constant block first.","err"); return; }
-  const hits=[...raw.matchAll(/const\s+(\w+)\s*=\s*(-?[\d.]+)\s*\*\s*(?:MM|DEG)/g)];
-  if(!hits.length){ say("No 'const NAME = value * MM;' lines in that.","err"); return; }
-  const byFs={}; P().params.forEach(q=>{ if(q.fs) byFs[q.fs]=q; });
-  const ok=[],clamped=[],other=[];
-  for(const [,name,num] of hits){
-    const q=byFs[name];
-    if(!q){ other.push(name); continue; }
-    const n=parseFloat(num), c=Math.min(q.max,Math.max(q.min,n));
-    el(q.id).value=c;
-    (c===n?ok:clamped).push(name+(c===n?"":" → "+c));
-  }
-  if(ok.length || clamped.length) DIRTY=true;
+  const r=applyPasted(raw);
+  if(!r.loaded.length && !r.other.length){ say("No 'const NAME = value * MM;' lines in that.","err"); return; }
+  if(r.loaded.length) DIRTY=true;
   render();
-  if(!ok.length && !clamped.length){
+  if(!r.loaded.length){
     say("None of those belong to "+P().label+".","err"); return; }
-  let m=`Loaded ${ok.length+clamped.length} value${ok.length+clamped.length===1?"":"s"}.`;
-  if(clamped.length) m+=` Clamped to slider range: ${clamped.join(", ")}.`;
-  if(other.length) m+=` Not driven here: ${other.join(", ")}.`;
-  say(m, clamped.length?"err":"ok");
+  let m=`Loaded ${r.loaded.length} value${r.loaded.length===1?"":"s"} exactly.`;
+  if(r.outside.length) m+=` Outside the slider range (used as typed): ${r.outside.join(", ")}.`;
+  if(r.other.length) m+=` Not driven here: ${r.other.join(", ")}.`;
+  say(m, "ok");
 });
 el("copy").addEventListener("click",async()=>{
   const b=el("copy");

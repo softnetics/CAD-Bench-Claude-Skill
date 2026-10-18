@@ -114,15 +114,16 @@ class Bench:
             rf = self.p.parts / f"{name}.recipe.js"
             src = rf.read_text(encoding="utf-8") if rf.is_file() else ""
             label, params = parse_recipe(src)
-            if params is None:
-                try:
-                    model = load_model(self.p.parts / f"{name}.py")
+            values = {}
+            try:
+                model = load_model(self.p.parts / f"{name}.py")
+                values = effective_params(model, self.p.parts / f"{name}.params.json")
+                if params is None:
                     params = [{"id": k, "val": v} for k, v in model.PARAMS.items()]
-                except Exception as e:  # listing must survive a broken part
-                    _log(f"{name}: {one_line(e)}")
-                    params = []
+            except Exception as e:  # listing must survive a broken part
+                _log(f"{name}: {one_line(e)}")
             out.append({"name": name, "label": label or name.replace("_", " ").capitalize(),
-                        "params": params, "recipe_js": src})
+                        "params": params or [], "values": values, "recipe_js": src})
         return out
 
     def _params(self, model, part, over):

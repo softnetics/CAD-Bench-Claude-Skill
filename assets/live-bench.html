@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAD Bench</title>
+<style>
+  :root{
+    --paper:#F7F8FA; --panel:#FFFFFF; --ink:#16202B; --ink-2:#5A6873;
+    --rule:#C6CFD8; --rule-soft:#E2E8ED;
+    --part:#6E9CC4; --part-line:#3D6B93; --void:#EDF1F5;
+    --warn:#C2410C; --warn-bg:#FDF0E8; --ok:#2F7A5A; --ok-bg:#EAF3EE;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --paper:#11161C; --panel:#171E26; --ink:#E4EAF0; --ink-2:#93A1AE;
+      --rule:#2B3540; --rule-soft:#212A33;
+      --part:#4A7CA3; --part-line:#8FB8D6; --void:#1C242D;
+      --warn:#E8834F; --warn-bg:#2A1A12; --ok:#5FB08A; --ok-bg:#122019;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#11161C; --panel:#171E26; --ink:#E4EAF0; --ink-2:#93A1AE;
+    --rule:#2B3540; --rule-soft:#212A33;
+    --part:#4A7CA3; --part-line:#8FB8D6; --void:#1C242D;
+    --warn:#E8834F; --warn-bg:#2A1A12; --ok:#5FB08A; --ok-bg:#122019;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font-family:system-ui,"Segoe UI",sans-serif;line-height:1.5;padding:22px 16px 40px}
+  .wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;
+         border-bottom:1px solid var(--rule);padding-bottom:12px}
+  h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.01em}
+  .mono{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+  select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);
+         border:1px solid var(--rule);border-radius:5px;padding:5px 8px}
+  .tabs{display:flex;gap:4px;margin-left:auto}
+  .tab{margin:0;border-radius:5px 5px 0 0}
+  .tab[aria-selected="true"]{border-color:var(--part-line);color:var(--part-line);font-weight:600}
+  .status{font-size:12.5px;color:var(--ink-2);min-height:1.2em}
+  .status.err,.msg.err{color:var(--warn)} .msg.ok{color:var(--ok)}
+  .cols{display:grid;grid-template-columns:340px 1fr;gap:22px;align-items:start}
+  @media (max-width:860px){.cols{grid-template-columns:1fr}}
+  .group{display:flex;flex-direction:column;gap:2px;margin-bottom:16px}
+  .glabel{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-2);
+          padding-bottom:6px;margin-bottom:4px;border-bottom:1px solid var(--rule-soft)}
+  .row{display:grid;grid-template-columns:1fr 92px 86px;gap:10px;align-items:center;padding:4px 0}
+  .row label{font-size:13px}
+  .row.locked{opacity:.72}
+  .numbox{width:100%;font-family:var(--mono);font-size:13px;text-align:right;
+          font-variant-numeric:tabular-nums;color:var(--ink);background:var(--paper);
+          border:1px solid var(--rule);border-radius:4px;padding:3px 6px}
+  .numbox.outside{border-color:var(--warn)}
+  .hint{grid-column:1/-1;margin-top:-3px;font-size:11.5px;color:var(--warn);text-align:right}
+  input[type=range]{width:100%;accent-color:var(--part-line);background:transparent}
+  :focus-visible{outline:2px solid var(--part-line);outline-offset:2px}
+  .views{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--rule-soft);
+         border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+  .views.stale{opacity:.55}
+  .cell{background:var(--panel);position:relative;aspect-ratio:4/3}
+  .cell span{position:absolute;left:8px;top:6px;font-size:10.5px;letter-spacing:.12em;
+             text-transform:uppercase;color:var(--ink-2)}
+  .cell svg{display:block;width:100%;height:100%}
+  .vis{stroke:var(--ink);stroke-width:1.4} .hid{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:4 3;opacity:.7}
+  .banner{padding:9px 12px;border-radius:5px;font-size:13px;background:var(--warn-bg);
+          border:1px solid var(--warn);color:var(--ink);font-family:var(--mono);word-break:break-word}
+  .derived{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:1px;
+           background:var(--rule-soft);border:1px solid var(--rule-soft);border-radius:6px;
+           overflow:hidden;margin-top:12px}
+  .d{background:var(--panel);padding:8px 11px}
+  .d span{display:block;font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-2)}
+  .d b{font-family:var(--mono);font-weight:500;font-size:14px;font-variant-numeric:tabular-nums}
+  .checks{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+  .chk{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:baseline;
+       font-size:13px;padding:8px 12px;border-radius:5px;border:1px solid transparent}
+  .chk.pass{background:var(--ok-bg);border-color:var(--ok)}
+  .chk.fail{background:var(--warn-bg);border-color:var(--warn)}
+  .chk i{font-style:normal;font-weight:600}
+  .chk.pass i{color:var(--ok)} .chk.fail i{color:var(--warn)}
+  .chk em{font-style:normal;font-family:var(--mono);color:var(--ink-2)}
+  .panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:12px 14px;margin-top:12px}
+  .panel h2{margin:0 0 6px;font-size:13px;font-weight:600}
+  textarea{width:100%;min-height:80px;resize:vertical;padding:8px 10px;border-radius:5px;
+           border:1px solid var(--rule);background:var(--paper);color:var(--ink);
+           font-family:var(--mono);font-size:12.5px}
+  button{font:inherit;font-size:13px;padding:6px 13px;border-radius:5px;border:1px solid var(--rule);
+         background:var(--panel);color:var(--ink);cursor:pointer;margin-top:8px}
+  button:hover{border-color:var(--part-line)}
+  button:disabled{opacity:.5;cursor:default}
+  .primary{border-color:var(--part-line);background:var(--part-line);color:#fff}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .msg{font-size:12.5px;margin-top:8px;min-height:1.2em;word-break:break-word}
+  .hcols{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:22px;align-items:start}
+  @media (max-width:860px){.hcols{grid-template-columns:1fr}}
+  .graph{background:var(--panel);border:1px solid var(--rule);border-radius:6px;overflow-x:auto}
+  .graph svg{display:block}
+  .node{cursor:pointer}
+  .node:hover rect.hit{fill:var(--rule-soft)}
+  .node.sel rect.hit{fill:var(--void)}
+  .node text{font-size:12.5px;fill:var(--ink)}
+  .node text.meta{font-family:var(--mono);font-size:11px;fill:var(--ink-2)}
+  .node.dim{opacity:.45}
+  .thumb{width:100%;aspect-ratio:4/3;background:#fff;border:1px solid var(--rule);border-radius:5px;
+         display:flex;align-items:center;justify-content:center;color:#555;font-size:12px;overflow:hidden}
+  .thumb img{width:100%;height:100%;object-fit:contain}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--ink-2);margin:6px 0}
+  .legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px}
+  .same{stroke:var(--ink-2);stroke-width:1;opacity:.6} .now{stroke:var(--part-line);stroke-width:2.2}
+  .was{stroke:var(--warn);stroke-width:2.2;stroke-dasharray:5 3}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>CAD Bench</h1>
+    <label class="mono" for="lb-part">part</label>
+    <select id="lb-part"></select>
+    <span class="mono" id="lb-file"></span>
+    <div class="tabs" role="tablist">
+      <button class="tab" id="lb-tab-bench" role="tab" aria-selected="true">Bench</button>
+      <button class="tab" id="lb-tab-history" role="tab" aria-selected="false">History</button>
+    </div>
+  </header>
+
+  <section id="lb-bench">
+    <div class="cols">
+      <div>
+        <div id="lb-controls"></div>
+        <div class="panel">
+          <h2>Load values</h2>
+          <textarea id="lb-paste" spellcheck="false" placeholder="const PLATE_X = 60 * MM;"></textarea>
+          <button id="lb-load">Load into sliders</button>
+          <div class="msg" id="lb-paste-msg"></div>
+        </div>
+      </div>
+      <div>
+        <div class="status" id="lb-status">loading…</div>
+        <div class="banner" id="lb-error" hidden></div>
+        <div class="views" id="lb-views"></div>
+        <div class="derived" id="lb-derived"></div>
+        <div class="checks" id="lb-checks"></div>
+        <div class="panel">
+          <h2>Hand-off</h2>
+          <div class="mono">Writes every value of this part to <span id="lb-pjson"></span>; Claude reads it from there.</div>
+          <button class="primary" id="lb-handoff">Hand these to Claude</button>
+          <div class="msg" id="lb-handoff-msg"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="lb-history" hidden>
+    <div class="panel" style="margin-top:0">
+      <div class="btns">
+        <input type="text" id="lb-vc-arg" placeholder="name / idea / reason" aria-label="checkpoint name, try idea or revert reason">
+        <button data-op="checkpoint">Checkpoint</button>
+        <button data-op="try">Try</button>
+        <button data-op="revert">Revert</button>
+        <button data-op="keep">Keep</button>
+        <button data-op="back">Back</button>
+        <button data-op="forward">Forward</button>
+      </div>
+      <div class="mono" style="margin-top:6px">A checkpoint saves the files in cad/ — hand off first to include the slider values.</div>
+      <div class="msg" id="lb-vc-msg"></div>
+    </div>
+    <div class="hcols" style="margin-top:12px">
+      <div class="graph" id="lb-graph"></div>
+      <div>
+        <div id="lb-node" hidden>
+          <div class="thumb" id="lb-thumb"></div>
+          <div style="margin-top:8px;font-size:13px" id="lb-node-msg"></div>
+          <div class="mono" id="lb-node-meta"></div>
+          <div class="btns">
+            <button id="lb-goto">Go here</button>
+            <button id="lb-compare">Compare with current</button>
+          </div>
+          <div class="btns">
+            <input type="text" id="lb-branch-idea" placeholder="idea for the new try" aria-label="idea for the new try">
+            <button id="lb-branch">Branch from here</button>
+          </div>
+          <div class="msg" id="lb-node-out"></div>
+        </div>
+        <div class="mono" id="lb-node-none">Select a node.</div>
+      </div>
+    </div>
+    <div class="panel" id="lb-compare-panel" hidden>
+      <h2>Compare: <span id="lb-compare-title"></span></h2>
+      <div class="legend"><span><i style="background:var(--part-line)"></i>only now</span>
+        <span><i style="background:var(--warn)"></i>only in the selected node</span>
+        <span><i style="background:var(--ink-2)"></i>unchanged</span></div>
+      <div class="views" id="lb-compare-views"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+let KEY = null;
+let PARTS = {};               // name -> {name,label,params,values,recipe,recipeError}
+const el = id => document.getElementById(id);
+const P = () => PARTS[KEY];
+// <value-store>
+// VALUES[partKey][paramId] is the source of truth for every parameter; the
+// slider only displays it. A typed or pasted number is used EXACTLY (no
+// clamp to the slider's range, no snap to its step); the slider just shows
+// the nearest position it can. Identical in bench-template.html and
+// live-bench.html -- tests/js/numbox.test.mjs runs this block from both.
+// Needs from the page: KEY (current part), P() (its recipe, with .params)
+// and el(id) (the slider element whose id is the param id).
+const VALUES = {};
+const valueStore = () => VALUES[KEY] || (VALUES[KEY] = {});
+const vals = () => { const s = valueStore(), o = {}; P().params.forEach(q => o[q.id] = s[q.id]); return o; };
+const sliderPos = (q, v) => Math.min(q.max, Math.max(q.min, v));
+const outsideSlider = (q, v) => v < q.min || v > q.max;
+// "12.5", " 12.5 mm", "-3", "1e-2", "45°" -> number; anything else -> NaN.
+function parseTyped(raw) {
+  const s = String(raw).trim().replace(/\s*(mm|°|deg)$/i, "");
+  return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s) ? Number(s) : NaN;
+}
+// Store v exactly; park the slider at the closest position it has.
+function setValue(q, v) {
+  valueStore()[q.id] = v;
+  el(q.id).value = String(sliderPos(q, v));
+}
+// Slider `input`: the slider's own (stepped) value becomes the value.
+function setFromSlider(q) { valueStore()[q.id] = parseFloat(el(q.id).value); }
+// Numbox commit: true if `raw` parsed and was stored, false (value unchanged) if not.
+function setTyped(q, raw) {
+  const n = parseTyped(raw);
+  if (!Number.isFinite(n)) return false;
+  setValue(q, n);
+  return true;
+}
+// A pasted `const NAME = value * MM;` block, matched to params by their `fs`
+// name. Returns {loaded, outside, other}: names applied, the subset outside
+// their slider's range (applied anyway), and names this part does not drive.
+function applyPasted(text) {
+  const byFs = {}; P().params.forEach(q => { if (q.fs) byFs[q.fs] = q; });
+  const loaded = [], outside = [], other = [];
+  const re = /const\s+(\w+)\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*(?:\*\s*(?:MM|DEG)\b)?\s*(?=;|$)/gim;
+  for (const [, name, num] of String(text).matchAll(re)) {
+    const q = byFs[name];
+    if (!q) { other.push(name); continue; }
+    const v = Number(num);
+    setValue(q, v);
+    loaded.push(name);
+    if (outsideSlider(q, v)) outside.push(name);
+  }
+  return { loaded, outside, other };
+}
+// </value-store>
+
+const VIEW_NAMES = ["top", "front", "side", "iso"];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function say(id, text, cls) { const m = el(id); m.textContent = text; m.className = "msg " + (cls || ""); }
+
+// ---- server (same origin; every POST is application/json or the server refuses it)
+async function getJSON(path) {
+  const r = await fetch(path, {cache: "no-store"});
+  return r.json();
+}
+async function postJSON(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"},
+                               body: JSON.stringify(body)});
+  return r.json();
+}
+
+// ---- parts: the recipe (cad/parts/<name>.recipe.js) is evaluated here for its
+// sliders, cards and checks. Its draw() is never called: the views come from
+// the kernel. A part with no recipe gets plain sliders from the model's PARAMS.
+function evalRecipe(src, name) {
+  if (!src || !src.trim()) return null;
+  const obj = new Function('"use strict"; return ({\n' + src + '\n});')();
+  const keys = Object.keys(obj);
+  const k = keys.find(k => k === name.replace(/_/g, "-")) || keys.find(k => k === name) || keys[0];
+  return k === undefined ? null : obj[k];
+}
+function normalizeParam(q) {
+  const v = Number(q.val) || 0;
+  const id = String(q.id);
+  // Same starting range scripts/new_part.py gives a scaffolded slider.
+  const min = q.min !== undefined ? Number(q.min) : (v > 0 ? Math.round(Math.max(v * 0.5, 0.1) * 100) / 100 : 0);
+  const max = q.max !== undefined ? Number(q.max) : Math.round(Math.max(v * 2, v + 1) * 100) / 100;
+  const step = q.step !== undefined ? Number(q.step) : (v < 10 ? 0.1 : v < 60 ? 0.5 : 1);
+  return Object.assign({}, q, {id, val: v, min, max, step,
+    fs: q.fs || id.toUpperCase(), u: q.u === undefined ? "MM" : q.u, g: q.g || "Main",
+    label: q.label || (id.charAt(0).toUpperCase() + id.slice(1).replace(/_/g, " "))});
+}
+function preparePart(x) {
+  let recipe = null, recipeError = null;
+  try { recipe = evalRecipe(x.recipe_js, x.name); }
+  catch (e) { recipeError = "recipe.js does not evaluate: " + e.message; }
+  const fromRecipe = recipe && Array.isArray(recipe.params) && recipe.params.length;
+  const params = (fromRecipe ? recipe.params : x.params || []).map(normalizeParam);
+  for (const k of Object.keys(x.values || {}))   // every model PARAMS key gets a slider
+    if (!params.some(q => q.id === k)) params.push(normalizeParam({id: k, val: x.values[k]}));
+  return {name: x.name, label: (recipe && recipe.label) || x.label, params,
+          values: x.values || {}, recipe, recipeError};
+}
+
+async function loadParts(resetValues) {
+  let list;
+  try { list = await getJSON("/api/parts"); }
+  catch (e) { el("lb-status").textContent = "cannot reach the bench server: " + e.message;
+              el("lb-status").className = "status err"; return; }
+  if (!Array.isArray(list)) { el("lb-status").textContent = list.error || "bad /api/parts reply";
+                              el("lb-status").className = "status err"; return; }
+  PARTS = {};
+  list.forEach(x => PARTS[x.name] = preparePart(x));
+  if (resetValues) for (const k of Object.keys(VALUES)) delete VALUES[k];
+  el("lb-part").innerHTML = list.map(x =>
+    `<option value="${esc(x.name)}">${esc(PARTS[x.name].label)}</option>`).join("");
+  if (!list.length) { KEY = null; el("lb-status").textContent = "no parts in cad/parts yet";
+                      el("lb-controls").innerHTML = ""; return; }
+  openPart(PARTS[KEY] ? KEY : list[0].name);
+}
+
+function openPart(k) {
+  KEY = k;
+  el("lb-part").value = k;
+  el("lb-file").textContent = `cad/parts/${k}.py`;
+  el("lb-pjson").textContent = `cad/parts/${k}.params.json`;
+  LAST_VIEWS = null; KERNEL = null; SHOWN[k] = 0;
+  el("lb-views").innerHTML = ""; el("lb-error").hidden = true;
+  say("lb-handoff-msg", ""); say("lb-paste-msg", "");
+  buildControls();
+  render();
+  requestBuild();
+  if (!el("lb-history").hidden) loadHistory();
+}
+
+function buildControls() {
+  const part = P(), groups = [];
+  part.params.forEach(q => { if (!groups.includes(q.g)) groups.push(q.g); });
+  el("lb-controls").innerHTML = groups.map(g =>
+    `<div class="group"><div class="glabel">${esc(g)}</div>` +
+    part.params.filter(q => q.g === g).map(q => {
+      const dis = q.locked ? " disabled" : "";
+      return `<div class="row${q.locked ? " locked" : ""}"${q.locked ? ` title="${esc(q.lockNote || "locked")}"` : ""}>` +
+        `<label for="${esc(q.id)}">${esc(q.label)}</label>` +
+        `<input type="range" id="${esc(q.id)}" min="${q.min}" max="${q.max}" step="${q.step}"${dis}>` +
+        `<input type="text" inputmode="decimal" class="numbox" id="o_${esc(q.id)}" aria-label="${esc(q.label)} value"${dis}>` +
+        `<div class="hint" id="h_${esc(q.id)}" hidden></div></div>`;
+    }).join("") + `</div>`).join("");
+  const have = valueStore();
+  part.params.forEach(q => {
+    // Start from where the part is now (its params.json), unless this
+    // session already moved the slider.
+    const start = q.id in have ? have[q.id] : (q.id in part.values ? part.values[q.id] : q.val);
+    setValue(q, start);
+    el(q.id).addEventListener("input", () => { setFromSlider(q); render(); requestBuild(); });
+    const box = el("o_" + q.id);
+    box.addEventListener("change", () => commitNumbox(q));
+    box.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); box.blur(); } });
+  });
+}
+
+// Typed value: used exactly (no clamp, no snap). Unparseable -> box reverts.
+function commitNumbox(q) {
+  const changed = setTyped(q, el("o_" + q.id).value);
+  showValue(q, vals()[q.id], true);
+  render();
+  if (changed) requestBuild();
+}
+function showValue(q, v, force) {
+  const box = el("o_" + q.id), hint = el("h_" + q.id), out = outsideSlider(q, v);
+  if (force || document.activeElement !== box)
+    box.value = String(v) + (q.u === "DEG" ? "°" : (q.u ? " mm" : ""));
+  box.classList.toggle("outside", out);
+  hint.hidden = !out;
+  hint.textContent = out ? `outside slider range ${q.min}–${q.max}` : "";
+}
+
+// ---- cards + checks, evaluated here from the recipe
+let KERNEL = null;   // {volume, bbox, ms} of the last good build
+function render() {
+  const part = P();
+  if (!part) return;
+  const p = vals();
+  part.params.forEach(q => showValue(q, p[q.id]));
+  const cards = [], rows = [];
+  if (KERNEL) {
+    cards.push(["Size (kernel)", KERNEL.bbox.size.map(n => +n.toFixed(3)).join(" × ")]);
+    cards.push(["Volume (kernel)", KERNEL.volume.toFixed(0) + " mm³"]);
+  }
+  let recipeErr = part.recipeError;
+  const r = part.recipe;
+  if (r && !recipeErr) {
+    try {
+      const d = typeof r.derive === "function" ? r.derive(p) : {};
+      if (typeof r.cards === "function") cards.push(...r.cards(d));
+      if (typeof r.checks === "function") rows.push(...r.checks(p, d));
+    } catch (e) { recipeErr = "recipe threw: " + e.message; }
+  }
+  el("lb-derived").innerHTML = cards.map(([k, x]) =>
+    `<div class="d"><span>${esc(k)}</span><b>${esc(x)}</b></div>`).join("");
+  el("lb-derived").hidden = !cards.length;
+  el("lb-checks").innerHTML = (recipeErr ? `<div class="chk fail"><i>!</i><span>${esc(recipeErr)}</span><em></em></div>` : "") +
+    rows.map(([ok, label, note]) => {
+      const broken = String(note).includes("NaN") || typeof ok !== "boolean";
+      return `<div class="chk ${broken ? "fail" : (ok ? "pass" : "fail")}"><i>${broken ? "!" : (ok ? "✓" : "✗")}</i>` +
+        `<span>${esc(label)}${broken ? " — CHECK IS BROKEN (NaN), not a real failure" : ""}</span>` +
+        `<em>${esc(note)}</em></div>`;
+    }).join("");
+}
+
+// ---- kernel views: latest wins. One request in flight per part; moves made
+// meanwhile coalesce into one follow-up. A reply older than what is shown is
+// dropped; a failed build keeps the last good views and shows the error.
+// The server remembers the newest seq per part across page loads, so seq
+// starts from the clock: a reloaded page must not look older than its last life.
+let SEQ = Date.now(), LAST_VIEWS = null;
+const LATEST = {}, SHOWN = {}, BUSY = {}, PENDING = {};
+function requestBuild() {
+  if (!KEY) return;
+  LATEST[KEY] = ++SEQ;
+  if (BUSY[KEY]) { PENDING[KEY] = true; return; }
+  sendBuild(KEY);
+}
+async function sendBuild(part) {
+  BUSY[part] = true; PENDING[part] = false;
+  const seq = LATEST[part], params = Object.assign({}, VALUES[part]);
+  el("lb-status").textContent = "building…"; el("lb-status").className = "status";
+  let r;
+  try { r = await postJSON("/api/build", {part, params, seq}); }
+  catch (e) { r = {ok: false, error: "server unreachable: " + e.message}; }
+  BUSY[part] = false;
+  if (PENDING[part]) sendBuild(part);
+  if (part !== KEY || r.stale || seq < (SHOWN[part] || 0)) return;
+  SHOWN[part] = seq;
+  if (r.ok) {
+    LAST_VIEWS = r.views;
+    KERNEL = {volume: r.volume, bbox: r.bbox, ms: r.ms};
+    el("lb-error").hidden = true;
+    el("lb-views").classList.remove("stale");
+    el("lb-views").innerHTML = viewsHTML(r.views);
+    if (!PENDING[part]) { el("lb-status").textContent = `built in ${r.ms} ms`; }
+    render();
+  } else {
+    el("lb-error").hidden = false;
+    el("lb-error").textContent = "Build failed — showing the last good views. " + r.error;
+    el("lb-views").classList.toggle("stale", !!LAST_VIEWS);
+    el("lb-status").textContent = "build failed"; el("lb-status").className = "status err";
+  }
+}
+
+function boundsOf(lines) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const pl of lines) for (const [x, y] of pl) {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  return x0 === Infinity ? [0, 0, 1, 1] : [x0, y0, x1, y1];
+}
+function viewBox(lines) {        // same framing as scripts/views.py _viewbox (y flipped)
+  const [x0, y0, x1, y1] = boundsOf(lines);
+  const w = Math.max(x1 - x0, 1e-6), h = Math.max(y1 - y0, 1e-6), px = w * 0.06, py = h * 0.06;
+  return `${x0 - px} ${-y1 - py} ${w + 2 * px} ${h + 2 * py}`;
+}
+const pathD = lines => lines.map(pl => "M" + pl.map(([x, y]) => `${x} ${-y}`).join(" L")).join(" ");
+const pathEl = (lines, cls) => lines.length
+  ? `<path class="${cls}" d="${pathD(lines)}" fill="none" vector-effect="non-scaling-stroke"/>` : "";
+function viewsHTML(views) {
+  return VIEW_NAMES.filter(n => views[n]).map(n => {
+    const v = views[n];
+    return `<div class="cell"><span>${n}</span><svg viewBox="${viewBox(v.vis.concat(v.hid))}" ` +
+      `preserveAspectRatio="xMidYMid meet">${pathEl(v.hid, "hid")}${pathEl(v.vis, "vis")}</svg></div>`;
+  }).join("");
+}
+
+// ---- hand-off: ALL of the part's values (the server writes only posted keys)
+el("lb-handoff").addEventListener("click", async () => {
+  const b = el("lb-handoff");
+  b.disabled = true;
+  try {
+    const r = await postJSON("/api/handoff", {part: KEY, params: vals()});
+    if (!r.ok) say("lb-handoff-msg", "Hand-off failed: " + r.error, "err");
+    else say("lb-handoff-msg", "Wrote " + r.path +
+             (r.checkpoint ? " · " + r.checkpoint : "") +
+             (r.checkpoint_error ? " · checkpoint failed: " + r.checkpoint_error : ""),
+             r.checkpoint_error ? "err" : "ok");
+  } catch (e) { say("lb-handoff-msg", "Hand-off failed: " + e.message, "err"); }
+  b.disabled = false;
+});
+
+el("lb-load").addEventListener("click", () => {
+  const raw = el("lb-paste").value;
+  if (!raw.trim()) { say("lb-paste-msg", "Paste a constant block first.", "err"); return; }
+  const r = applyPasted(raw);
+  if (!r.loaded.length && !r.other.length) { say("lb-paste-msg", "No 'const NAME = value * MM;' lines in that.", "err"); return; }
+  if (!r.loaded.length) { say("lb-paste-msg", "None of those belong to " + P().label + ".", "err"); return; }
+  render(); requestBuild();
+  let m = `Loaded ${r.loaded.length} value${r.loaded.length === 1 ? "" : "s"} exactly.`;
+  if (r.outside.length) m += ` Outside the slider range (used as typed): ${r.outside.join(", ")}.`;
+  if (r.other.length) m += ` Not driven here: ${r.other.join(", ")}.`;
+  say("lb-paste-msg", m, "ok");
+});
+
+el("lb-part").addEventListener("change", e => openPart(e.target.value));
+
+function showTab(name) {
+  el("lb-bench").hidden = name !== "bench";
+  el("lb-history").hidden = name !== "history";
+  el("lb-tab-bench").setAttribute("aria-selected", String(name === "bench"));
+  el("lb-tab-history").setAttribute("aria-selected", String(name === "history"));
+  if (name === "history") loadHistory();
+}
+el("lb-tab-bench").addEventListener("click", () => showTab("bench"));
+el("lb-tab-history").addEventListener("click", () => showTab("history"));
+
+// ---- history: main track and each try track as lanes, newest first
+let HISTORY = [], SELECTED = null, ABANDONED = {}, NODE_SHOWN = null;
+async function loadHistory() {
+  if (!KEY) return;
+  let rows, all;
+  try {
+    [rows, all] = await Promise.all([getJSON("/api/history?part=" + encodeURIComponent(KEY)),
+                                     getJSON("/api/history")]);
+  } catch (e) { rows = {error: e.message}; }
+  // The part's own history skips commits that did not touch its files -- often
+  // the "abandoned:" one -- so which tries were abandoned comes from all of cad/.
+  ABANDONED = {};
+  if (Array.isArray(all)) all.forEach(r => {
+    if (r.kind === "abandoned") ABANDONED[r.track] = r.msg.replace(/^abandoned:\s*/, "");
+  });
+  if (!Array.isArray(rows)) {
+    el("lb-graph").innerHTML = `<div class="msg err" style="padding:10px">${esc(rows.error || "history unavailable")}</div>`;
+    return;
+  }
+  HISTORY = rows;
+  if (SELECTED && !rows.some(r => r.sha === SELECTED)) SELECTED = null;
+  drawGraph();
+  showNode();
+}
+
+function drawGraph() {
+  const rows = HISTORY;
+  if (!rows.length) {
+    el("lb-graph").innerHTML = `<div class="mono" style="padding:12px">No checkpoints for ${esc(KEY)} yet.</div>`;
+    return;
+  }
+  const tracks = ["main"];
+  rows.forEach(r => { if (!tracks.includes(r.track)) tracks.push(r.track); });
+  const abandoned = ABANDONED;
+  const RH = 40, LW = 22, X0 = 16, tx = X0 + tracks.length * LW + 8;
+  const pos = {};
+  rows.forEach((r, i) => pos[r.sha] = [X0 + tracks.indexOf(r.track) * LW, 22 + i * RH]);
+  const firstOfTrack = {};
+  rows.forEach(r => { if (!(r.track in firstOfTrack)) firstOfTrack[r.track] = r.sha; });
+  let edges = "", nodes = "";
+  rows.forEach(r => {
+    const [x, y] = pos[r.sha], dim = abandoned[r.track] !== undefined;
+    const to = r.parent && pos[r.parent];
+    if (to) edges += `<path d="M${x} ${y} C${x} ${y + RH * .6} ${to[0]} ${to[1] - RH * .6} ${to[0]} ${to[1]}" ` +
+      `fill="none" stroke="var(--rule)" stroke-width="2"${dim ? ' opacity=".45"' : ""}/>`;
+    const fill = r.track === "main" ? "var(--part-line)" : (dim ? "var(--ink-2)" : "var(--ok)");
+    const lane = r.track === "main" ? "" : `try ${r.track}` + (dim ? ` · abandoned: ${abandoned[r.track]}` : "");
+    nodes += `<g class="node${dim ? " dim" : ""}${r.sha === SELECTED ? " sel" : ""}" data-sha="${esc(r.sha)}" tabindex="0" role="button">` +
+      `<rect class="hit" x="0" y="${y - RH / 2}" width="100%" height="${RH}" fill="transparent"/>` +
+      `<circle cx="${x}" cy="${y}" r="6" fill="${r.kind === "abandoned" ? "var(--panel)" : fill}" stroke="${fill}" stroke-width="2"/>` +
+      `<text x="${tx}" y="${y - 2}">${esc(r.msg)}</text>` +
+      `<text class="meta" x="${tx}" y="${y + 13}">${esc(r.sha.slice(0, 8))} · ${esc(r.when.replace("T", " ").slice(0, 16))}` +
+      `${lane && firstOfTrack[r.track] === r.sha ? " · " + esc(lane) : ""}</text></g>`;
+  });
+  el("lb-graph").innerHTML = `<svg width="100%" height="${rows.length * RH + 6}" style="min-width:420px">${edges}${nodes}</svg>`;
+  el("lb-graph").querySelectorAll(".node").forEach(g => {
+    const pick = () => { SELECTED = g.dataset.sha; drawGraph(); showNode(); };
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+}
+
+function showNode() {
+  const r = HISTORY.find(x => x.sha === SELECTED);
+  el("lb-node").hidden = !r; el("lb-node-none").hidden = !!r;
+  if (!r) return;
+  el("lb-node-msg").textContent = r.msg;
+  el("lb-node-meta").textContent = `${r.sha.slice(0, 12)} · ${r.track} · ${r.kind}`;
+  if (NODE_SHOWN === r.sha) return;   // a history refresh keeps the op's result line
+  NODE_SHOWN = r.sha;
+  say("lb-node-out", "");
+  const thumb = el("lb-thumb");
+  thumb.textContent = "building thumbnail…";
+  const img = new Image();
+  img.alt = "views at " + r.sha.slice(0, 8);
+  img.onload = () => { if (SELECTED === r.sha) { thumb.innerHTML = ""; thumb.appendChild(img); } };
+  img.onerror = () => { if (SELECTED === r.sha) thumb.textContent = "no thumbnail for this node"; };
+  img.src = `/api/thumb?sha=${encodeURIComponent(r.sha)}&part=${encodeURIComponent(KEY)}`;
+}
+
+// File-changing ops rewrite cad/: reload the parts (their params.json) and
+// drop this session's slider values so the bench shows what is on disk.
+const RESTORES = new Set(["revert", "back", "forward", "goto"]);
+async function vc(op, arg, outId) {
+  let r;
+  try { r = await postJSON("/api/vc", {op, arg}); }
+  catch (e) { r = {ok: false, error: e.message}; }
+  say(outId, r.ok ? r.line : r.error, r.ok ? "ok" : "err");
+  if (r.ok && RESTORES.has(op)) await loadParts(true);
+  await loadHistory();
+  return r.ok;
+}
+document.querySelectorAll("#lb-history button[data-op]").forEach(b =>
+  b.addEventListener("click", async () => {
+    const arg = el("lb-vc-arg").value.trim();
+    b.disabled = true;
+    await vc(b.dataset.op, arg || null, "lb-vc-msg");
+    b.disabled = false;
+  }));
+el("lb-goto").addEventListener("click", () => vc("goto", SELECTED, "lb-node-out"));
+el("lb-branch").addEventListener("click", async () => {
+  const idea = el("lb-branch-idea").value.trim();
+  if (!idea) { say("lb-node-out", "Name the idea for the new try first.", "err"); return; }
+  const sha = SELECTED;
+  if (await vc("goto", sha, "lb-node-out")) await vc("try", idea, "lb-node-out");
+});
+
+// ---- compare: the selected node's sheet (from /api/thumb) over the current
+// kernel views; visible edges present in only one of them are highlighted.
+const ptKey = (x, y) => `${Math.round(Number(x.toPrecision(6)) * 100)},${Math.round(Number(y.toPrecision(6)) * 100)}`;
+function lineKey(pl) {
+  const f = pl.map(([x, y]) => ptKey(x, y)).join(" "), b = pl.slice().reverse().map(([x, y]) => ptKey(x, y)).join(" ");
+  return f < b ? f : b;
+}
+function sheetViews(svgText) {         // scripts/views.py sheet_svg -> {name: [polyline]}
+  const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const out = {};
+  doc.documentElement.querySelectorAll(":scope > svg").forEach(cell => {
+    const label = cell.nextElementSibling;
+    const name = label && label.tagName.toLowerCase() === "text" ? label.textContent.trim() : null;
+    if (!name) return;
+    const vis = cell.querySelector("path.vis");
+    out[name] = !vis ? [] : vis.getAttribute("d").split("M").filter(s => s.trim()).map(seg =>
+      seg.split("L").map(pt => { const [x, y] = pt.trim().split(/\s+/).map(Number); return [x, -y]; }));
+  });
+  return out;
+}
+el("lb-compare").addEventListener("click", async () => {
+  const sha = SELECTED;
+  if (!LAST_VIEWS) { say("lb-node-out", "No current views yet — wait for a build.", "err"); return; }
+  say("lb-node-out", "comparing…");
+  let text;
+  try {
+    const r = await fetch(`/api/thumb?sha=${encodeURIComponent(sha)}&part=${encodeURIComponent(KEY)}`, {cache: "no-store"});
+    text = await r.text();
+    if (!/svg/.test(r.headers.get("Content-Type") || "")) throw new Error(JSON.parse(text).error);
+  } catch (e) { say("lb-node-out", "Compare failed: " + e.message, "err"); return; }
+  const was = sheetViews(text);
+  let changed = 0;
+  el("lb-compare-views").innerHTML = VIEW_NAMES.map(n => {
+    const now = (LAST_VIEWS[n] || {vis: []}).vis, then = was[n] || [];
+    const nowK = new Map(now.map(pl => [lineKey(pl), pl])), thenK = new Map(then.map(pl => [lineKey(pl), pl]));
+    const same = [], onlyNow = [], onlyThen = [];
+    nowK.forEach((pl, k) => (thenK.has(k) ? same : onlyNow).push(pl));
+    thenK.forEach((pl, k) => { if (!nowK.has(k)) onlyThen.push(pl); });
+    changed += onlyNow.length + onlyThen.length;
+    return `<div class="cell"><span>${n}</span><svg viewBox="${viewBox(now.concat(then))}" preserveAspectRatio="xMidYMid meet">` +
+      pathEl(same, "same") + pathEl(onlyThen, "was") + pathEl(onlyNow, "now") + `</svg></div>`;
+  }).join("");
+  el("lb-compare-title").textContent = `now vs ${sha.slice(0, 8)} — ${changed ? changed + " edge(s) differ" : "no visible difference"}`;
+  el("lb-compare-panel").hidden = false;
+  say("lb-node-out", "");
+  el("lb-compare-panel").scrollIntoView({behavior: "smooth", block: "start"});
+});
+
+loadParts(false);
+</script>
+</body>
+</html>
