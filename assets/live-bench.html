@@ -163,7 +163,6 @@
         <button data-op="back">Back</button>
         <button data-op="forward">Forward</button>
       </div>
-      <div class="mono" style="margin-top:6px">A checkpoint saves the files in cad/ — hand off first to include the slider values.</div>
       <div class="msg" id="lb-vc-msg"></div>
     </div>
     <div class="hcols" style="margin-top:12px">
@@ -592,10 +591,25 @@ function showNode() {
 // File-changing ops rewrite cad/: reload the parts (their params.json) and
 // drop this session's slider values so the bench shows what is on disk.
 const RESTORES = new Set(["revert", "back", "forward", "goto"]);
+// <vc-ops>
+// A snapshot covers model, slider values and recipe together: ops that
+// snapshot cad/ first hand off ALL current values (written to params.json).
+// If that hand-off fails, the op does not run. tests/js/vc_handoff.test.mjs
+// runs this block.
+const SNAPSHOT_OPS = new Set(["checkpoint", "try", "keep"]);
+async function runVc(op, arg) {
+  if (SNAPSHOT_OPS.has(op) && KEY) {
+    let h;
+    try { h = await postJSON("/api/handoff", {part: KEY, params: vals()}); }
+    catch (e) { h = {ok: false, error: e.message}; }
+    if (!h.ok) return {ok: false, error: `hand-off failed, ${op} not run: ${h.error}`};
+  }
+  try { return await postJSON("/api/vc", {op, arg}); }
+  catch (e) { return {ok: false, error: e.message}; }
+}
+// </vc-ops>
 async function vc(op, arg, outId) {
-  let r;
-  try { r = await postJSON("/api/vc", {op, arg}); }
-  catch (e) { r = {ok: false, error: e.message}; }
+  const r = await runVc(op, arg);
   say(outId, r.ok ? r.line : r.error, r.ok ? "ok" : "err");
   if (r.ok && RESTORES.has(op)) await loadParts(true);
   await loadHistory();
