@@ -104,7 +104,12 @@ def write(solved, path, masses, floor=True):
     def _joints(el, edge, T_child):
         j = edge.joint
         L = np.linalg.inv(T_child) @ solved.joint_world(j)
-        pos, ax = _s(L[:3, 3] * MM), _s(L[:3, 2])
+        # A positive joint value always moves b relative to a about (along) a's
+        # z. MuJoCo moves the CHILD relative to the parent, so when a is the
+        # child (b was placed first) the axis is negated; the limits and the
+        # motor's sign then keep their meaning unchanged.
+        sense = -1.0 if edge.child == j.a[0] else 1.0
+        pos, ax = _s(L[:3, 3] * MM), _s(sense * L[:3, 2])
         jname = j.name()
         kinds = {"revolute": ["hinge"], "wheel": ["hinge"], "slider": ["slide"],
                  "cylindrical": ["hinge", "slide"], "fixed": []}[j.type]

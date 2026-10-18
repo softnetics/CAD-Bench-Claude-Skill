@@ -167,3 +167,53 @@ def test_rerun_overwrites(tmp_path, capsys):
     cart(path).run()
     cart(path).run()
     assert (tmp_path / "exports" / "cart" / "cart.xml").is_file()
+
+
+def _hinge_state(tmp_path, base, q):
+    """Range, and the arm's turn in the body's frame from angle 0 to angle q.
+
+    The base differs between calls, so the world frame does too; everything is
+    compared in the body's frame.
+    """
+    import mujoco
+
+    import asm_export
+    import mjcf
+    path = project(tmp_path / base)
+    asm = A.Assembly("hinge", path=path, base=base, base_joint="fixed")
+    asm.add("body", part="block")
+    asm.add("arm", part="block")
+    asm.join("body.side", "arm.bottom", "revolute", limits=(0, 90),
+             motor=A.Motor(torque=0.1))
+    solved = asm.solve()
+    masses = {n: asm_export.mass_properties(i) for n, i in solved.instances.items()}
+    xml = path.parent / "hinge.xml"
+    mjcf.write(solved, xml, masses)
+    m = mujoco.MjModel.from_xml_path(str(xml))
+    d = mujoco.MjData(m)
+    j = m.joint("body.side-arm.bottom")
+
+    def arm_in_body(angle):
+        d.qpos[j.qposadr[0]] = angle
+        mujoco.mj_forward(m, d)
+        Rb, Ra = (d.xmat[m.body(n).id].reshape(3, 3) for n in ("body", "arm"))
+        return Rb.T @ Ra
+
+    turn = arm_in_body(q) @ arm_in_body(0.0).T
+    return tuple(m.jnt_range[j.id]), turn
+
+
+def _turn_axis(R):
+    v = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    return v / np.linalg.norm(v)
+
+
+def test_hinge_sense_and_limits_do_not_depend_on_which_part_is_placed_first(tmp_path):
+    q = np.radians(30)
+    rng1, turn1 = _hinge_state(tmp_path, "body", q)     # arm is the child
+    rng2, turn2 = _hinge_state(tmp_path, "arm", q)      # body is the child
+    assert rng1 == pytest.approx((0, np.pi / 2), abs=1e-5) and rng2 == pytest.approx(rng1)
+    # a positive angle turns the arm about +body.side z (+x), whichever came first
+    assert np.allclose(_turn_axis(turn1), (1, 0, 0), atol=1e-9)
+    assert np.allclose(_turn_axis(turn2), (1, 0, 0), atol=1e-9)
+    assert np.allclose(turn2, turn1, atol=1e-9)
