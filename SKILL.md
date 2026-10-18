@@ -325,12 +325,11 @@ in the working folder). Never run git yourself for CAD history.
 ## Assemblies
 
 Several parts joined into a machine (a robot chassis, a mechanism). Lookup:
-`references/assembly.md`; worked example: `models/balance_bot.py`.
+`references/assembly.md`.
 
 1. **Purpose first.** Before resizing a part or first using it in an
    assembly, write down in plain words what it is for and the rules that
-   follow ("wheel hub: bore = motor shaft Ø + 0.1, press fit; hub length ≥
-   1.5 × shaft Ø"). Get the user's OK, then ask **project only or
+   follow ("lid fit: lid width = box width, lid thickness ≥ box height / 5"). Get the user's OK, then ask **project only or
    worldwide**. Save as a `.rules` file in `cad/rules/` (project) or
    `<skill>/library/rules/` (worldwide; git-ignored, never committed unless
    the user explicitly contributes it). Only files whose `confirmed:` is a
@@ -343,7 +342,7 @@ Several parts joined into a machine (a robot chassis, a mechanism). Lookup:
    `A.on_edge` / `A.on_circle`. A connector's z points out of its part.
 3. **Assembly file** in the project's `cad/assemblies/<name>.py`, parts in
    `cad/parts/`, rules in `cad/rules/`. (`models/` in the skill holds only
-   the shipped worked example; never put the user's parts, assemblies or
+   the shipped worked examples; never put the user's parts, assemblies or
    rules there: the skill is a clone of a public repo.) Start it with the
    same path line generated parts use, so it also runs on its own:
    `sys.path.insert(0, os.environ.get("CAD_BENCH_SCRIPTS") or r"<skill>/scripts")`,

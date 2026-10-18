@@ -3,14 +3,15 @@
 
 One plain-text file per kind of part:
 
-    kind: wheel hub
-    purpose: A wheel pressed straight onto a motor shaft; it carries the robot's weight and the motor's torque.
-    roles: wheel, shaft
+    kind: lid fit
+    purpose: A lid hinged on the back edge of a box; it covers the box and keeps a usable thickness.
+    roles: lid, base
     confirmed: 2026-10-18
-    rule: wheel.bore_d = shaft.shaft_d + 0.1      # printed holes come out about 0.1 small, so this presses on
-    rule: wheel.hub_len >= 1.5 * shaft.shaft_d    # enough hub length to grip the shaft
+    rule: lid.w = base.w                  # the lid is as wide as the box it covers
+    rule: lid.t >= base.h / 5             # thick enough not to flex
 
-(the shipped models/rules/wheel-hub.rules). `=` rules SET a parameter before
+(the same text as the test fixture tests/fixtures/hinge_box/rules/lid-fit.rules,
+which a test keeps in step). `=` rules SET a parameter before
 anything is built, so a size change carries through; `>=`, `<=`, `>`, `<`,
 `==` rules are CHECKED (a break warns, export still happens).
 
@@ -181,7 +182,7 @@ def _refs(node, text):
 
 
 def bind(text, roles):
-    """Replace role names (wheel, shaft) with instance names (wheel_l, motor_l)."""
+    """Replace role names (lid, base) with instance names (lid_a, box_a)."""
     stmt = _parse(text)
     for n in ast.walk(stmt):
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name):

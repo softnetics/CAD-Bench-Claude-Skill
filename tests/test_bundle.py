@@ -13,13 +13,14 @@ def test_bundle_holds_the_runtime_and_nothing_excluded(tmp_path):
                  "scripts/rules.py", "scripts/mjcf.py", "scripts/asm_export.py",
                  "scripts/asm_render.py", "scripts/cad.py", "scripts/bench_server.py",
                  "assets/live-bench.html", "references/assembly.md",
-                 "models/balance_bot.py", "models/bb_wheel.py",
-                 "models/rules/wheel-hub.rules", "docs/screenshots/01-sliders-drawing.png"):
+                 "models/boss_plate.py", "docs/screenshots/01-sliders-drawing.png"):
         assert "cad-bench/" + want in names, want
     for n in names:
         rel = n[len("cad-bench/"):]
         assert not rel.startswith(("tests/", "library/", ".superpowers/", "docs/superpowers/"))
         assert "exports/" not in rel and "__pycache__" not in rel
+        assert not any(w in rel for w in ("balance", "bb_", "wheel" + "-hub", "hinge_box", "fixtures"))
+        assert not rel.startswith("models/rules/")
         assert not rel.endswith(".stl") and not rel.startswith("models/_")
 
 

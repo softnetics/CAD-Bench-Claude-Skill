@@ -155,28 +155,26 @@ part names its connection points (computed from its own dimensions, so a
 resize carries through); an assembly file joins them:
 
 ```python
-asm = A.Assembly("balance_bot", base="chassis", base_joint="free", path=__file__)
-asm.add("chassis", part="bb_chassis")
-asm.add("motor_l", part="bb_gear_motor", mass=0.03)
-asm.add("wheel_l", part="bb_wheel")
-asm.join("chassis.motor_l", "motor_l.mount", "fixed")
-asm.join("motor_l.shaft", "wheel_l.hub", "wheel", flip=True,
-         motor=A.Motor(torque=0.08, speed=20))
-asm.use_rules("wheel hub", wheel="wheel_l", shaft="motor_l")
+asm = A.Assembly("hinge_box", base="base", base_joint="free", path=__file__)
+asm.add("base", part="box")
+asm.add("lid", part="lid")
+asm.join("base.hinge", "lid.hinge", "revolute", flip=True, limits=(0, 110),
+         motor=A.Motor(torque=0.05, speed=2))
+asm.use_rules("lid fit", lid="lid", base="base")
 asm.run()
 ```
 
 In a project the file lives in `cad/assemblies/`; Claude runs it with
-`python scripts/cad.py assemble balance_bot`, which prints one line:
+`python scripts/cad.py assemble hinge_box`, which prints one line:
 
 ```
-balance_bot: 5 parts, 4 joints, 4/4 rules ok -> cad\exports\balance_bot
+hinge_box: 2 parts, 1 joint, 2/2 rules ok -> cad\exports\hinge_box
 ```
 
 - **Rules, confirmed by you.** Before resizing, Claude writes down what a
   part is for and the rules that follow ("bore = motor shaft + 0.1"), and
   uses them only after you say yes. Rules that set a size carry it through
-  (change the motor, the wheel bore follows); rules that check a size warn
+  (change the box width, the lid width follows); rules that check a size warn
   when broken. Saved as plain text, per project (`cad/rules/`) or
   worldwide for every project (`library/rules/` in the skill, git-ignored),
   so the next similar part comes with suggestions.
@@ -187,7 +185,7 @@ balance_bot: 5 parts, 4 joints, 4/4 rules ok -> cad\exports\balance_bot
   connector axis markers, a STEP of the whole assembly, and a MuJoCo model
   (bodies, joints, motors, masses and inertias from the CAD geometry) that
   is checked to load and step.
-- Example: [`models/balance_bot.py`](./models/balance_bot.py). Reference:
+- Reference:
   [`references/assembly.md`](./references/assembly.md). Design:
   [`docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md`](./docs/superpowers/specs/2026-10-18-cad-bench-assemblies-design.md).
   Needs `pip install mujoco` in the venv.
@@ -263,8 +261,6 @@ cad-bench/
 │   ├── boss_plate.py             — plain prismatic: plate, bosses, bores
 │   ├── enclosure.py              — fillet → shell → chamfer, internal bosses, a port
 │   ├── duct.py                   — loft: round-to-rectangular transition
-│   ├── balance_bot.py            — assembly: chassis, two motors, two wheels
-│   │   (bb_*.py parts, rules/wheel-hub.rules)
 │   └── _parity_demo.py/.recipe.js  — check_mesh_parity.py's own test
 │                                fixture (a box with a bore), not a real part
 ├── assets/
@@ -338,8 +334,8 @@ and
    - Parts join at named connection points computed from their own
      dimensions, so a resize carries through. Under-defined placement,
      overlaps, hard-coded connectors and broken rules warn.
-   - Rules you confirm carry sizes between parts (the wheel bore follows the
-     motor shaft), per project in `cad/rules/` or worldwide.
+   - Rules you confirm carry sizes between parts (the lid width follows the
+     box width), per project in `cad/rules/` or worldwide.
    - Exports a placement report, a picture with connector markers, a STEP of
      the whole assembly, and a MuJoCo model that is checked to load and step.
    ```

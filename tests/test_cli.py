@@ -136,46 +136,46 @@ def test_serve_prints_one_line(plain_dir):
 
 # ---------------------------------------------------------------- assemble
 
-def bot_project(root):
-    """The shipped balance-bot, laid out as a user project's cad/ folder."""
+def fixture_project(root):
+    """The hinge_box fixture, laid out as a user project's cad/ folder."""
     import shutil
-    models = REPO / "models"
+    fixture = REPO / "tests" / "fixtures" / "hinge_box"
     assert cad(root, "init").returncode == 0
-    for f in ("bb_chassis.py", "bb_gear_motor.py", "bb_wheel.py"):
-        shutil.copy(models / f, root / "cad" / "parts" / f)
-    shutil.copy(models / "balance_bot.py", root / "cad" / "assemblies" / "balance_bot.py")
-    shutil.copy(models / "rules" / "wheel-hub.rules", root / "cad" / "rules" / "wheel-hub.rules")
-    return root / "cad" / "assemblies" / "balance_bot.py"
+    for f in ("fx_base.py", "fx_lid.py"):
+        shutil.copy(fixture / f, root / "cad" / "parts" / f)
+    shutil.copy(fixture / "hinge_box.py", root / "cad" / "assemblies" / "hinge_box.py")
+    shutil.copy(fixture / "rules" / "lid-fit.rules", root / "cad" / "rules" / "lid-fit.rules")
+    return root / "cad" / "assemblies" / "hinge_box.py"
 
 
 def test_assemble_runs_a_project_assembly_by_name_or_path(plain_dir):
     assert " " in str(plain_dir)
-    path = bot_project(plain_dir)
-    for target in ("balance_bot", str(path)):
+    path = fixture_project(plain_dir)
+    for target in ("hinge_box", str(path)):
         r = cad(plain_dir, "assemble", target)
         assert r.returncode == 0, r.stdout + r.stderr
         out = lines(r)
         assert len(out) == 1 and out[0].startswith(
-            "balance_bot: 5 parts, 4 joints, 4/4 rules ok -> "), out
-    xml = plain_dir / "cad" / "exports" / "balance_bot" / "balance_bot.xml"
+            "hinge_box: 3 parts, 2 joints, 2/2 rules ok -> "), out
+    xml = plain_dir / "cad" / "exports" / "hinge_box" / "hinge_box.xml"
     assert xml.is_file()
 
 
 def test_assembly_file_runs_directly_with_the_scripts_env(plain_dir):
     import os
-    path = bot_project(plain_dir)
+    path = fixture_project(plain_dir)
     env = dict(os.environ, CAD_BENCH_SCRIPTS=str(REPO / "scripts"))
     r = subprocess.run([sys.executable, str(path)], capture_output=True, text=True,
                        encoding="utf-8", cwd=plain_dir, env=env)
     assert r.returncode == 0, r.stderr
-    assert lines(r)[0].startswith("balance_bot: 5 parts")
+    assert lines(r)[0].startswith("hinge_box: 3 parts")
 
 
 def test_assemble_errors_are_one_line(plain_dir):
-    path = bot_project(plain_dir)
+    path = fixture_project(plain_dir)
     r = cad(plain_dir, "assemble", "nope")
     assert r.returncode == 1 and len(lines(r)) == 1 and "nope" in r.stderr, lines(r)
-    path.write_text(path.read_text().replace('"wheel hub"', '"gearbox"'))
-    r = cad(plain_dir, "assemble", "balance_bot")
+    path.write_text(path.read_text().replace('"lid fit"', '"gearbox"'))
+    r = cad(plain_dir, "assemble", "hinge_box")
     assert r.returncode == 1 and lines(r) == [lines(r)[0]], lines(r)
     assert r.stderr.startswith("assembly: no rule file of kind 'gearbox'"), r.stderr

@@ -8,7 +8,6 @@ the skill needs at run time and nothing else:
     scripts/*.py   assets/*   references/*.md
     docs/screenshots/*.png         (HOWTO.md shows them)
     models/*.py (worked examples, not _-prefixed fixtures)
-    models/rules/wheel-hub.rules   (the example's confirmed rules)
 
 Never tests/, docs/ (beyond the screenshots), library/, .superpowers/,
 exports, __pycache__ or *.stl. Text files are stored with LF line endings
@@ -32,7 +31,6 @@ TEXT = {".md", ".py", ".html", ".js", ".rules", ".txt", ""}
 TOP = ["SKILL.md", "README.md", "HOWTO.md", "LICENSE"]
 GLOBS = ["scripts/*.py", "assets/*", "references/*.md", "docs/screenshots/*.png",
          "models/*.py"]
-EXTRA = ["models/rules/wheel-hub.rules"]
 EXCLUDED = ("tests/", "docs/superpowers/", "library/", ".superpowers/", "exports/",
             "__pycache__/", "node_modules/")
 
@@ -55,7 +53,7 @@ def excluded(rel):
 
 def files(root=ROOT):
     """Sorted relative paths that go into the bundle."""
-    out = set(TOP) | set(EXTRA)
+    out = set(TOP)
     for g in GLOBS:
         out |= {p.relative_to(root).as_posix() for p in root.glob(g) if p.is_file()}
     out = {r for r in out if not excluded(r)}

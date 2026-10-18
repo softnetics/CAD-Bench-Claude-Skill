@@ -66,7 +66,7 @@ def asm_of(proj, shaft_d=3.0, **kw):
 # ---------------------------------------------------------------- files
 
 def test_load_rule_file(proj):
-    f = proj / "rules" / "wheel-hub.rules"
+    f = proj / "rules" / "hub.rules"
     f.write_text(HUB_RULES)
     rf = R.load_rule_file(f)
     assert rf.kind == "wheel hub"
@@ -287,15 +287,17 @@ def test_derived_value_that_reads_the_target_is_a_cycle(proj):
         asm.solve()
 
 
-def test_docstring_example_matches_the_shipped_rule_file():
-    shipped = R.load_rule_file(R.SKILL_ROOT / "models" / "rules" / "wheel-hub.rules")
+def test_docstring_example_matches_the_fixture_rule_file():
+    fixture = R.load_rule_file(R.SKILL_ROOT / "tests" / "fixtures" / "hinge_box" / "rules"
+                               / "lid-fit.rules")
     doc = [ln.strip() for ln in R.__doc__.splitlines()]
     example = [ln.split(":", 1)[1].split("#")[0].strip() for ln in doc if ln.startswith("rule:")]
-    assert example == [r.text for r in shipped.rules]
-    assert f"purpose: {shipped.purpose}" in doc
+    assert example == [r.text for r in fixture.rules]
+    assert f"purpose: {fixture.purpose}" in doc
+    assert f"kind: {fixture.kind}" in doc and f"roles: {', '.join(fixture.roles)}" in doc
 
 
-def test_user_rules_in_models_are_git_ignored_but_the_example_is_not():
+def test_user_rules_in_models_and_the_library_are_git_ignored():
     import subprocess
     root = R.SKILL_ROOT
 
@@ -303,5 +305,4 @@ def test_user_rules_in_models_are_git_ignored_but_the_example_is_not():
         r = subprocess.run(["git", "check-ignore", "-q", "--no-index", rel], cwd=root)
         return r.returncode == 0
     assert ignored("models/rules/my-robot-arm.rules")
-    assert not ignored("models/rules/wheel-hub.rules")
     assert ignored("library/rules/anything.rules")

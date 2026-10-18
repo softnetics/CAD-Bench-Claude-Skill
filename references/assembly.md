@@ -2,8 +2,7 @@
 
 Joining parts at named connectors, rules that carry sizes between parts,
 the checks, and the STEP / MuJoCo exports. **A lookup, not a read-through.**
-`models/balance_bot.py` (with `bb_chassis.py`, `bb_gear_motor.py`,
-`bb_wheel.py`, `rules/wheel-hub.rules`) is usually the faster answer.
+The snippets below are the faster answer.
 
 ## Contents
 
@@ -84,14 +83,13 @@ import sys
 sys.path.insert(0, os.environ.get("CAD_BENCH_SCRIPTS") or r"<skill>/scripts")
 import assembly as A
 
-asm = A.Assembly("balance_bot", base="chassis", base_joint="free", path=__file__)
-asm.add("chassis", part="bb_chassis", params={"plate_x": 140}, material="PLA")
-asm.add("motor_l", part="bb_gear_motor", mass=0.03)       # kg, overrides density
-asm.join("chassis.motor_l", "motor_l.mount", "fixed")
-asm.join("motor_l.shaft", "wheel_l.hub", "wheel", flip=True,
+asm = A.Assembly("motor_hub", base="motor", base_joint="free", path=__file__)
+asm.add("motor", part="gear_motor", params={"shaft_d": 5}, material="PLA")
+asm.add("hub", part="hub", mass=0.03)                     # kg, overrides density
+asm.join("motor.shaft", "hub.bore", "wheel", flip=True,
          motor=A.Motor(torque=0.08, speed=20))           # N·m, rad/s
-asm.use_rules("wheel hub", wheel="wheel_l", shaft="motor_l")
-asm.allow_overlap("wheel_l", "motor_l")                  # only for an intended press fit
+asm.use_rules("hub fit", hub="hub", shaft="motor")
+asm.allow_overlap("hub", "motor")                        # only for an intended press fit
 asm.run()
 ```
 
@@ -121,12 +119,12 @@ user's OK.** Only confirmed rules are used. Then ask: this project only, or
 worldwide?
 
 ```
-kind: wheel hub
-purpose: A wheel pressed onto a motor shaft; carries the robot's weight.
-roles: wheel, shaft
+kind: hub fit
+purpose: A hub pressed onto a motor shaft.
+roles: hub, shaft
 confirmed: 2026-10-18
-rule: wheel.bore_d = shaft.shaft_d + 0.1      # printed holes shrink: presses on
-rule: wheel.hub_len >= 1.5 * shaft.shaft_d    # enough hub to grip
+rule: hub.bore_d = shaft.shaft_d + 0.1      # printed holes shrink: presses on
+rule: hub.len >= 1.5 * shaft.shaft_d        # enough hub to grip
 ```
 
 - `=` **sets** a parameter before the build (the size carries through);
@@ -180,7 +178,7 @@ The hard-coded check nudges each parameter ±2 % and rebuilds (like
 One line on a clean run:
 
 ```
-balance_bot: 5 parts, 4 joints, 4/4 rules ok -> models\exports\balance_bot
+motor_hub: 2 parts, 1 joint, 2/2 rules ok -> models\exports\motor_hub
 ```
 
 plus one `  warn: ...` line per warning. Everything else is in files, in

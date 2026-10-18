@@ -1,0 +1,7 @@
+# Test-fixture rule file for hinge_box.py. Plain text, one kind of part per file.
+kind: lid fit
+purpose: A lid hinged on the back edge of a box; it covers the box and keeps a usable thickness.
+roles: lid, base
+confirmed: 2026-10-18
+rule: lid.w = base.w                  # the lid is as wide as the box it covers
+rule: lid.t >= base.h / 5             # thick enough not to flex

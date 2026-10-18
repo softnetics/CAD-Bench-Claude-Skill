@@ -42,7 +42,6 @@ models/exports/
 # unless the user explicitly contributes a rule
 library/
 
-# models/ is the shipped worked example only; user rules belong in a
-# project's cad/rules/. Anything else dropped in here stays out of the repo.
-models/rules/*
-!models/rules/wheel-hub.rules
+# User rules belong in a project's cad/rules/; anything dropped in
+# models/rules/ stays out of the repo.
+models/rules/
