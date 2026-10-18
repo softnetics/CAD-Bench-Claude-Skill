@@ -222,3 +222,21 @@ def test_cli_prints_one_line(plain_dir):
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_sense_endpoint(bench):
+    _, url = bench
+    r = get(url, "/api/sense?part=spacer")
+    assert r["ok"] is True and isinstance(r["flags"], list)
+    assert r["line"].startswith("sense spacer:") and "\n" not in r["line"]
+    bad = get(url, "/api/sense?part=nope")
+    assert bad["ok"] is False
+
+
+def test_sense_honours_host_check(bench):
+    _, url = bench
+    req = urllib.request.Request(url + "api/sense?part=spacer",
+                                 headers={"Host": "evil.example"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=10)
+    assert e.value.code == 403

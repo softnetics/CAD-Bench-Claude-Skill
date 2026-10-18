@@ -247,6 +247,24 @@ def _branch_commit(repo, msg):
     return sha, n
 
 
+def _sense_note(p):
+    """` · sense: N flags` for the project's parts, or "" (clean, or any failure)."""
+    try:
+        import sense as _sense  # lazy: pulls in the kernel
+        from partmodel import effective_params, load_model
+        n = 0
+        for f in sorted(p.parts.glob("*.py")):
+            if f.stem.startswith("_"):
+                continue
+            model = load_model(f)
+            n += len(_sense.sense(model, effective_params(model, p.parts / f"{f.stem}.params.json")))
+        return f" · sense: {n} flag{'' if n == 1 else 's'}" if n else ""
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        return ""
+
+
 def checkpoint(p, name=None) -> str:
     repo = ensure_repo(p)
     _require_branch(repo)
@@ -261,7 +279,7 @@ def checkpoint(p, name=None) -> str:
         _save_state(repo, state)
     if sha is None:
         return _summary("unchanged", name, 0, _head(repo))
-    return _summary("checkpoint", name, n, sha)
+    return _summary("checkpoint", name, n, sha) + _sense_note(p)
 
 
 def try_(p, idea) -> str:

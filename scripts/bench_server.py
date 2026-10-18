@@ -182,6 +182,14 @@ class Bench:
         with self.build_lock:  # cad/ is rewritten: no build may read it halfway
             return {"ok": True, "line": op(self.p, str(arg) if arg is not None else None)}
 
+    def sense(self, part):
+        f = self._part_file(part)
+        import sense as _sense  # lazy: pulls in the kernel
+        with self.build_lock:
+            model = load_model(f)
+            flags = _sense.sense(model, self._params(model, part, None))
+        return {"ok": True, "flags": flags, "line": _sense.summarize(part, flags)}
+
     def history(self, part):
         if part and not PART_NAME.fullmatch(part):
             raise BadRequest(f"bad part name {part!r}")
@@ -288,6 +296,8 @@ def _handler(bench):
                 self._send(200, html, "text/html")
             elif u.path == "/api/parts":
                 self._run(bench.parts)
+            elif u.path == "/api/sense":
+                self._run(lambda: bench.sense(q.get("part", "")))
             elif u.path == "/api/history":
                 self._run(lambda: bench.history(q.get("part")))
             elif u.path == "/api/thumb":
