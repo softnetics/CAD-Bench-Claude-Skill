@@ -346,7 +346,10 @@ def _move(p, step):
         return _summary("at newest", "checkpoint", 0, cps[0]) + " · nothing newer"
     if j >= len(cps):
         return _summary("at oldest", "checkpoint", 0, cps[-1]) + " · nothing older"
-    return _go(repo, state, cps[i], cps[j], "back to" if step > 0 else "forward to")
+    # The cursor may sit off the checkpoint line (goto a try commit): compare the
+    # working cad/ against where it actually is, not against cps[i].
+    here = cur if cur and _cad_tree(repo, cur) else cps[i]
+    return _go(repo, state, here, cps[j], "back to" if step > 0 else "forward to")
 
 
 def _go(repo, state, here_sha, target_sha, verb):

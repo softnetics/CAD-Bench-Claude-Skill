@@ -328,3 +328,21 @@ def test_goto_restores_commit_and_sets_cursor(any_dir):
     assert (p.parts / "a.py").read_text() == "a = unsaved\n"
     with pytest.raises(VCError):
         goto(p, "0" * 40)
+
+
+def test_back_after_goto_try_commit(any_dir):
+    _, d = any_dir
+    p = open_project(d)
+    for i in (1, 2):
+        (p.parts / "a.py").write_text(f"a = {i}\n")
+        checkpoint(p, f"c{i}")
+    try_(p, "idea")
+    (p.parts / "a.py").write_text("a = tried\n")
+    checkpoint(p, "t1")
+    revert(p, "nope")
+    tried = next(r["sha"] for r in history(p) if r["msg"] == "try: t1")
+    goto(p, tried)
+    assert (p.parts / "a.py").read_text() == "a = tried\n"
+    line = back(p)  # must not claim unsaved changes
+    assert "\n" not in line
+    assert (p.parts / "a.py").read_text() == "a = 1\n"

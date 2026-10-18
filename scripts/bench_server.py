@@ -263,7 +263,22 @@ def _handler(bench):
                 raise BadRequest("request body must be a JSON object")
             return req
 
+        def _refuse(self, why):
+            _log(f"{self.path.split('?')[0]}: refused: {why}")
+            self._json({"ok": False, "error": f"refused: {why}"}, 403)
+
+        def _host_ok(self):
+            """Only our own origin: blocks DNS-rebinding pages that reach 127.0.0.1."""
+            port = self.server.server_address[1]
+            host = (self.headers.get("Host") or "").strip().lower()
+            if host in (f"127.0.0.1:{port}", f"localhost:{port}"):
+                return True
+            self._refuse(f"host {host!r}")
+            return False
+
         def do_GET(self):
+            if not self._host_ok():
+                return
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             if u.path in ("/", "/index.html"):
@@ -280,6 +295,13 @@ def _handler(bench):
                 self._json({"ok": False, "error": f"not found: {u.path}"}, 404)
 
         def do_POST(self):
+            if not self._host_ok():
+                return
+            # application/json is never a "simple" request, so another site's page
+            # needs a CORS preflight, which this server never approves.
+            if self.headers.get_content_type() != "application/json":
+                self._refuse("Content-Type must be application/json")
+                return
             routes = {"/api/build": bench.build, "/api/handoff": bench.handoff,
                       "/api/vc": bench.vc}
             fn = routes.get(urlparse(self.path).path)

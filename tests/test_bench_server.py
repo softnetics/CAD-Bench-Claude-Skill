@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -169,6 +170,27 @@ def test_index_served(bench):
     with urllib.request.urlopen(url, timeout=30) as r:
         assert r.headers.get_content_type() == "text/html"
         assert b"<html" in r.read().lower()
+
+
+def test_refuses_cross_site_requests(bench):
+    p, url = bench
+    base = url.rstrip("/")
+    body = json.dumps({"part": "spacer", "params": {"w": 1}}).encode("utf-8")
+    simple = urllib.request.Request(base + "/api/handoff", data=body, method="POST",
+                                    headers={"Content-Type": "text/plain"})
+    rebound = urllib.request.Request(base + "/api/handoff", data=body, method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "Host": "evil.example:" + url.split(":")[-1].rstrip("/")})
+    rebound_get = urllib.request.Request(base + "/api/history", headers={"Host": "evil.example"})
+    for req in (simple, rebound, rebound_get):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req, timeout=30)
+        assert e.value.code == 403
+    assert not (p.parts / "spacer.params.json").exists()
+    local = urllib.request.Request(base + "/api/parts",
+                                   headers={"Host": "localhost:" + url.split(":")[-1].rstrip("/")})
+    with urllib.request.urlopen(local, timeout=30) as r:
+        assert r.status == 200
 
 
 def test_binds_localhost_only(bench, plain_dir):
