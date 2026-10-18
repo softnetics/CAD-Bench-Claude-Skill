@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -250,3 +251,55 @@ def test_history_filters_by_part(git_repo):
     assert h["kind"] == "try" and h["track"] == "tweak-a" and h["parent"]
     assert set(h) == {"sha", "msg", "when", "kind", "track", "parent"}
     assert history(p)[1]["track"] == "main"
+
+
+def test_settings_never_versioned_or_restored(any_dir):
+    _, d = any_dir
+    p = open_project(d)
+    top = ensure_repo(p).top
+    for i in (1, 2):
+        (p.parts / "a.py").write_text(f"a = {i}\n")
+        checkpoint(p, f"c{i}")
+    assert ".cad-bench.json" not in git(top, "ls-files")
+    set_auto(p, True)
+    try_(p, "idea")
+    (p.parts / "a.py").write_text("a = 9\n")
+    checkpoint(p, "e1")
+    revert(p, "nope")
+    assert is_auto(p) is True
+    back(p)  # must not refuse: the settings change is not an unsaved cad change
+    assert (p.parts / "a.py").read_text() == "a = 1\n"
+    assert is_auto(p) is True
+    forward(p)
+    assert is_auto(p) is True
+    for h in history(p):
+        assert ".cad-bench.json" not in git(top, "ls-tree", "-r", "--name-only", h["sha"])
+
+
+def test_try_pins_base_snapshot_under_ref(git_repo):
+    p = open_project(git_repo)
+    (p.parts / "a.py").write_text("a = 1\n")
+    checkpoint(p, "base")
+    (p.parts / "a.py").write_text("a = uncommitted\n")
+    try_(p, "idea")
+    state = json.loads((git_repo / ".git" / "cad-bench" / "state.json").read_text())
+    ref = "refs/cad-bench/base/idea"
+    assert git(git_repo, "rev-parse", f"{ref}:cad").strip() == state["base_tree"]
+    assert git(git_repo, "show", f"{ref}:cad/parts/a.py") == "a = uncommitted\n"
+    assert git(git_repo, "rev-parse", f"{ref}^").strip() == state["base"]
+    # same idea again gets a fresh slug, base ref not overwritten
+    keep(p)
+    try_(p, "idea")
+    assert git(git_repo, "rev-parse", "--verify", "refs/cad-bench/base/idea-2")
+
+
+def test_legacy_tracked_settings_not_committed_or_staged(git_repo):
+    p = open_project(git_repo)
+    git(git_repo, "add", "-f", "cad/.cad-bench.json")
+    git(git_repo, "commit", "-q", "-m", "old project tracked settings")
+    set_auto(p, True)
+    (p.parts / "a.py").write_text("a = 1\n")
+    checkpoint(p, "c1")
+    assert "cad/.cad-bench.json" not in git(git_repo, "show", "--name-only", "--format=", "HEAD")
+    assert "cad/.cad-bench.json" not in git(git_repo, "diff", "--cached", "--name-only")
+    assert is_auto(p) is True

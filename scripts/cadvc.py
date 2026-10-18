@@ -18,6 +18,8 @@ from pathlib import Path
 from cadproj import load_settings, save_settings
 
 TRY_PREFIX = "refs/cad-bench/try/"
+BASE_PREFIX = "refs/cad-bench/base/"
+SETTINGS = ".cad-bench.json"  # per-machine settings: never staged or restored
 _IN_PROGRESS = {
     "MERGE_HEAD": "merge",
     "REBASE_HEAD": "rebase",
@@ -129,12 +131,22 @@ def _cad_tree(repo, commitish):
     return out.strip() if out else None
 
 
+def _settings_path(repo):
+    return SETTINGS if repo.cad_rel == "." else f"{repo.cad_rel}/{SETTINGS}"
+
+
+def _cad_pathspec(repo):
+    """cad/ minus the settings file, as top-relative pathspec args."""
+    return [repo.cad_rel, f":(exclude){_settings_path(repo)}"]
+
+
 def _snapshot(repo):
     """Top-level tree = HEAD with cad/ replaced by the working cad/; real index untouched."""
     with _temp_index() as env:
         if _head(repo):
             _git(repo, "read-tree", "HEAD", env=env)
         _git(repo, "add", "-A", "--", repo.cad_rel, env=env)
+        _git(repo, "update-index", "--force-remove", "--", _settings_path(repo), env=env)
         return _git(repo, "write-tree", env=env).strip()
 
 
@@ -149,7 +161,8 @@ def _n_changed(repo, a_tree, b_tree):
     """Number of files differing between two cad trees (None = empty)."""
     a_tree = a_tree or _empty_tree(repo)
     b_tree = b_tree or _empty_tree(repo)
-    out = _git(repo, "diff-tree", "-r", "--name-only", a_tree, b_tree)
+    out = _git(repo, "diff-tree", "-r", "--name-only", a_tree, b_tree,
+               "--", ".", f":(exclude){SETTINGS}")
     return len([ln for ln in out.splitlines() if ln])
 
 
@@ -164,9 +177,10 @@ def _restore(repo, cad_tree):
             _git(repo, "read-tree", cad_tree, env=env)
         else:
             _git(repo, "read-tree", f"--prefix={repo.cad_rel}/", cad_tree, env=env)
+        _git(repo, "update-index", "--force-remove", "--", _settings_path(repo), env=env)
         target = set(_git(repo, "ls-files", "-z", env=env).split("\0")) - {""}
         current = set(_git(repo, "ls-files", "-z", "-c", "-o", "--exclude-standard",
-                           "--", repo.cad_rel).split("\0")) - {""}
+                           "--", *_cad_pathspec(repo)).split("\0")) - {""}
         for rel in sorted(current - target):
             f = repo.top / rel
             if f.is_file() or f.is_symlink():
@@ -218,11 +232,16 @@ def _branch_commit(repo, msg):
 
     Returns (sha, n_files) or (None, 0) when cad/ has nothing new.
     """
+    # (`add` with an exclude pathspec naming an ignored file errors, so add cad/
+    # whole -- the gitignored settings file is skipped -- and unstage it if an
+    # older project still tracks it.)
     _git(repo, "add", "-A", "--", repo.cad_rel)
+    if _git(repo, "ls-files", "--", _settings_path(repo)).strip():
+        _try_git(repo, "reset", "-q", "--", _settings_path(repo))
     head = _head(repo)
-    if head and _try_git(repo, "diff", "--cached", "--quiet", "HEAD", "--", repo.cad_rel) is not None:
+    if head and _try_git(repo, "diff", "--cached", "--quiet", "HEAD", "--", *_cad_pathspec(repo)) is not None:
         return None, 0
-    _git(repo, "commit", "-q", "-m", msg, "--", repo.cad_rel)
+    _git(repo, "commit", "-q", "-m", msg, "--", *_cad_pathspec(repo))
     sha = _head(repo)
     n = len([ln for ln in _git(repo, "show", "--name-only", "--format=", sha).splitlines() if ln])
     return sha, n
@@ -253,11 +272,16 @@ def try_(p, idea) -> str:
         raise VCError(f"already trying '{state['active']}'; keep or revert it first")
     slug = base_slug = _slug(idea)
     i = 2
-    while _try_git(repo, "rev-parse", "--verify", "-q", TRY_PREFIX + slug) is not None:
+    while any(_try_git(repo, "rev-parse", "--verify", "-q", pre + slug) is not None
+              for pre in (TRY_PREFIX, BASE_PREFIX)):
         slug = f"{base_slug}-{i}"
         i += 1
     head = _head(repo)
-    base_tree = _subtree(repo, _snapshot(repo))
+    top_tree = _snapshot(repo)
+    base_tree = _subtree(repo, top_tree)
+    # Pin the starting snapshot under a ref so gc can never prune it before revert.
+    args = ["commit-tree", top_tree, "-m", f"base: {idea}"] + (["-p", head] if head else [])
+    _git(repo, "update-ref", BASE_PREFIX + slug, _git(repo, *args).strip())
     state.update(active=idea, slug=slug, base=head, base_tree=base_tree)
     state.pop("cursor", None)
     _save_state(repo, state)
@@ -323,7 +347,7 @@ def _move(p, step):
     if j >= len(cps):
         return _summary("at oldest", "checkpoint", 0, cps[-1]) + " · nothing older"
     here = _subtree(repo, _snapshot(repo))
-    if here != _cad_tree(repo, cps[i]):
+    if _n_changed(repo, here, _cad_tree(repo, cps[i])):
         raise VCError("cad/ has unsaved changes; checkpoint them before moving back/forward")
     target = _cad_tree(repo, cps[j])
     n = _n_changed(repo, here, target)

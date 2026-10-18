@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_SETTINGS = {"auto_checkpoint": False}
-CAD_GITIGNORE = "exports/\n__pycache__/\n"
+CAD_GITIGNORE_LINES = ("exports/", "__pycache__/", ".cad-bench.json")
 
 
 class ProjectError(Exception):
@@ -41,10 +41,19 @@ def open_project(working_dir, create=True):
             d.mkdir(parents=True, exist_ok=True)
         if not p.settings_path.exists():
             save_settings(p, dict(DEFAULT_SETTINGS))
-        gi = cad / ".gitignore"
-        if not gi.exists():
-            gi.write_text(CAD_GITIGNORE)
+        _ensure_gitignore(cad / ".gitignore")
     return p
+
+
+def _ensure_gitignore(gi):
+    """Add any missing standard lines to cad/.gitignore, keeping the user's own lines."""
+    text = gi.read_text() if gi.exists() else ""
+    have = {ln.strip() for ln in text.splitlines()}
+    missing = [ln for ln in CAD_GITIGNORE_LINES if ln not in have]
+    if missing:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        gi.write_text(text + "".join(ln + "\n" for ln in missing))
 
 
 def load_settings(p):

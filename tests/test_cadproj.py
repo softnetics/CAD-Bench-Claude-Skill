@@ -28,3 +28,14 @@ def test_project_in_path_with_spaces(plain_dir):
     p = open_project(plain_dir)
     assert p.root == plain_dir.resolve()
     assert p.settings_path.is_file()
+
+
+def test_gitignore_excludes_settings_and_upgrades_existing(plain_dir):
+    p = open_project(plain_dir)
+    assert ".cad-bench.json" in (p.cad / ".gitignore").read_text().splitlines()
+    gi = p.cad / ".gitignore"
+    gi.write_text("exports/\n__pycache__/\nmine.tmp")  # older project, no trailing newline
+    open_project(plain_dir)
+    open_project(plain_dir)
+    lines = gi.read_text().splitlines()
+    assert lines == ["exports/", "__pycache__/", "mine.tmp", ".cad-bench.json"]
