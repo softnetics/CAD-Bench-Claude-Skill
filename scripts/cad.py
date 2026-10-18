@@ -9,7 +9,8 @@
     revert <reason>          abandon the experiment (kept on the graph with the reason)
     keep                     the experiment becomes the main version
     back | forward           step through checkpoints like undo / redo
-    auto on|off              checkpoint automatically at every hand-off
+    auto on|off              checkpoint at every model change: each bench hand-off
+                             (the server) and each model edit (Claude runs checkpoint)
     history [part] [--json]  one summary line (--json: the full list)
     serve [--port N]         run the live bench (blocks; prints its URL)
     sense <part>             flag redundant / no-effect / hard-coded dimensions
@@ -101,14 +102,7 @@ def cmd_history(a):
 
 def cmd_serve(a):
     import bench_server  # lazy: pulls in the kernel
-    _project(a)
-    server, url = bench_server.serve(Path(a.project), port=a.port)
-    print(f"bench: {url}  ({len(server.bench.part_names())} parts)", flush=True)
-    try:
-        while server.thread.is_alive():
-            server.thread.join(0.5)
-    except KeyboardInterrupt:
-        server.shutdown()
+    bench_server.run_forever(_project(a).root, port=a.port)
     return None
 
 
@@ -159,7 +153,7 @@ def _parser():
     add("keep", cmd_keep, help="keep the experiment")
     add("back", cmd_back, help="go to the previous checkpoint")
     add("forward", cmd_forward, help="go to the next checkpoint")
-    add("auto", cmd_auto, help="auto-checkpoint on hand-off").add_argument("state", choices=("on", "off"))
+    add("auto", cmd_auto, help="checkpoint at every model change").add_argument("state", choices=("on", "off"))
     h = add("history", cmd_history, help="summary of checkpoints and tries")
     h.add_argument("part", nargs="?")
     h.add_argument("--json", action="store_true", help="print the full list as JSON")

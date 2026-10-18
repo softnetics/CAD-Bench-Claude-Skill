@@ -85,7 +85,7 @@ new feature tree.
 **Reverse-engineering an existing, source-less STL instead of designing
 something new?** Different failure mode, different method — go to
 `references/stl-reverse-engineering.md` before sampling a single point by
-hand. Short version: `python scripts/inspect_stl.py part.stl` lists every
+hand. Short version: `python <skill>/scripts/inspect_stl.py part.stl` lists every
 distinct Z the mesh actually has vertices at (never guess sample heights —
 a guessed list can straddle every feature boundary and miss them all), and
 `--z <value>` separates a confusing multi-loop face into radius bands before
@@ -296,8 +296,11 @@ in the working folder). Never run git yourself for CAD history.
 | "auto checkpoints on/off" | `cad.py auto on` / `cad.py auto off` |
 | "what have we tried", "history" | `cad.py history [part]` |
 
-- **Manual by default**: checkpoint when the user asks. With auto on, the
-  bench checkpoints at every hand-off.
+- **Manual by default**: checkpoint when the user asks. With auto on
+  (`init`'s line says which), a checkpoint happens at every model change:
+  each bench hand-off (the server does it) and each model edit -- after every
+  edit you make to a file in `cad/parts/`, run `cad.py checkpoint <what
+  changed>` yourself.
 - **A snapshot covers `cad/` together** (model, values, recipe), so a revert
   can never desync them. Exports are not stored; rebuild them.
 - **Each command prints one line; relay it, don't expand on it.** E.g.

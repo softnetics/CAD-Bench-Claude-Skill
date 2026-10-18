@@ -346,18 +346,24 @@ def serve(project_dir, port=0, open_browser=False):
     return server, url
 
 
-def main():
-    ap = argparse.ArgumentParser(description="local live CAD bench")
-    ap.add_argument("--project", default=os.getcwd(), help="project directory (default: cwd)")
-    ap.add_argument("--port", type=int, default=0, help="port (default: any free port)")
-    a = ap.parse_args()
-    server, url = serve(Path(a.project), port=a.port)
-    print(f"bench: {url}  ({len(server.bench.part_names())} parts)", flush=True)
+def run_forever(project_dir, port=0):
+    """Serve, print the one `bench: <url>  (<n> parts)` line, block until Ctrl+C."""
+    server, url = serve(Path(project_dir), port=port)
+    n = len(server.bench.part_names())
+    print(f"bench: {url}  ({n} part{'' if n == 1 else 's'})", flush=True)
     try:
         while server.thread.is_alive():
             server.thread.join(0.5)
     except KeyboardInterrupt:
         server.shutdown()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="local live CAD bench")
+    ap.add_argument("--project", default=os.getcwd(), help="project directory (default: cwd)")
+    ap.add_argument("--port", type=int, default=0, help="port (default: any free port)")
+    a = ap.parse_args()
+    run_forever(a.project, port=a.port)
 
 
 if __name__ == "__main__":

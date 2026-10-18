@@ -122,12 +122,13 @@ def test_drawing_writes_exact_sheet(plain_dir):
 
 def test_serve_prints_one_line(plain_dir):
     assert cad(plain_dir, "init").returncode == 0
+    (plain_dir / "cad" / "parts" / "blk.py").write_text(STUB)
     proc = subprocess.Popen([sys.executable, str(CAD), "serve", "--project", str(plain_dir)],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding="utf-8")
     try:
         first = proc.stdout.readline()
-        assert first.startswith("bench: http://127.0.0.1:") and first.endswith("(0 parts)\n")
+        assert first.startswith("bench: http://127.0.0.1:") and first.endswith("/  (1 part)\n"), first
     finally:
         proc.kill()
         proc.communicate()

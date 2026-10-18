@@ -266,7 +266,8 @@ The design for step 1 is in
    python scripts/cad.py revert <reason>      abandon it (kept on the graph)
    python scripts/cad.py keep                 the experiment becomes the main version
    python scripts/cad.py back | forward       undo / redo across checkpoints
-   python scripts/cad.py auto on|off          checkpoint at every bench hand-off
+   python scripts/cad.py auto on|off          checkpoint at every model change:
+                                              each bench hand-off and each model edit
    python scripts/cad.py history [part]       one-line summary (--json: full list)
    python scripts/cad.py serve                the live bench, on 127.0.0.1
    python scripts/cad.py sense <part>         redundant / no-effect / hard-coded flags

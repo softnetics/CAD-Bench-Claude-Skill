@@ -8,7 +8,7 @@ in a browser, not a mockup.
 
 **Jump to:** [ask for a part](#1-ask-for-a-part) ·
 [the model](#2-claude-writes-a-parametric-model-not-a-one-off-shape) ·
-[the bench page](#3-claude-publishes-a-cad-bench-page--this-is-what-you-see) ·
+[the bench page](#3-claude-opens-the-bench-page--this-is-what-you-see) ·
 [the checks](#4-a-row-of-checks-not-a-generic-linter) ·
 [handing values back](#5-hand-the-values-back-to-claude) ·
 [locked sliders](#6-some-sliders-are-locked-on-purpose) ·
@@ -52,7 +52,10 @@ Every part is a small Python file against a real B-rep kernel
 (`build123d`/OCCT — the same kernel lineage as FreeCAD), not a mesh
 approximation. For the corner-boss plate above, that's `models/boss_plate.py`:
 a rectangular plate, a cylindrical boss at each corner, each bored, corners
-rounded. Running it directly (which Claude does, not you) prints one line on
+rounded. (That one is a worked example shipped with the skill. Your own parts
+live with your project: Claude creates a `cad/` folder in the folder you're
+working in, and each part goes in `cad/parts/`, versioned with plain-word
+checkpoints.) Running it directly (which Claude does, not you) prints one line on
 success:
 
 ```
@@ -67,17 +70,23 @@ is 0.5%), and the bounding box is the size the parameters say it should be.
 If any of that were false, **the file would not exist** — a failed check
 deletes the STL rather than leaving a wrong part on disk.
 
-## 3. Claude publishes a CAD Bench page — this is what you see
+## 3. Claude opens the bench page — this is what you see
 
-A live page with a slider for every dimension, a preview sketch that
-redraws as you move them:
+Claude starts a small local bench server and opens its page in the app's
+browser pane: a slider for every dimension, and exact top / front / side /
+iso views straight from the CAD kernel (hidden edges dashed) that redraw
+about 50 ms after each move. The screenshots below are from the shareable
+claude.ai version of the page, which Claude publishes when you want to view
+or share a part from another device. It shows a static drawing instead of
+live views; the sliders, checks and hand-off work the same way.
 
 ![Sliders on the left, a live top-view and section sketch on the right](docs/screenshots/01-sliders-drawing.png)
 
 Type a value directly in the box next to a slider instead of dragging, and
-it clamps to that slider's own range and snaps to its step — 17.3 mm on a
-0.5 mm-step slider lands on 17.5, not 17.3, matching exactly what the slider
-itself would have landed on.
+that exact number is used: 17.3 mm on a 0.5 mm-step slider stays 17.3, and a
+value beyond the slider's range is kept too. The slider parks at its end and
+the box shows the real number with an "outside slider range" hint. A value the
+part can't actually take isn't quietly changed; it turns a check red (§4).
 
 ## 4. A row of checks, not a generic linter
 
@@ -104,11 +113,11 @@ sliders landed on, ready to hand off:
 
 ![A textarea to paste constants back in, and a generated const block for the model's parameters](docs/screenshots/03-handoff.png)
 
-Inside the Claude Code app this panel also shows a **"Hand these to
-Claude"** button (it needs a small capability the app grants; a plain
+On the local bench, **"Hand these to Claude"** writes the values straight
+into the part's `cad/parts/<part>.params.json`. On the shareable claude.ai
+page the same button stores them where Claude can read them back (a plain
 browser falls back to **Copy parameters**, shown above). Either way, Claude
-reads the values back, writes them to `models/boss_plate.params.json`, and
-re-runs the model — same gate, same one-line-on-success report, now with
+re-runs the model with them — same gate, same one-line-on-success report, now with
 your numbers instead of the defaults. You get the new STL and a note on
 which check had the least margin, since that's where the next change is
 most likely to break something.
@@ -182,8 +191,8 @@ something you need to track yourself.)
 
 ## 9. A live 3D preview, for the rare part that needs one
 
-Most bench pages show a flat 2D sketch — a top view, a section — redrawn
-live as sliders move. That's the default because it's cheap and exact for
+The local bench always shows exact views from the kernel. The shareable
+claude.ai page shows a flat 2D drawing instead, which is cheap and exact for
 anything prismatic. A small minority of parts (something with a real,
 doubly-curved surface — a dome, a lofted shell) can instead get a rendered
 3D preview that rotates and updates live, built the same way a video game
