@@ -10,6 +10,7 @@ from cadvc import (
     checkpoint,
     ensure_repo,
     forward,
+    goto,
     history,
     is_auto,
     keep,
@@ -303,3 +304,27 @@ def test_legacy_tracked_settings_not_committed_or_staged(git_repo):
     assert "cad/.cad-bench.json" not in git(git_repo, "show", "--name-only", "--format=", "HEAD")
     assert "cad/.cad-bench.json" not in git(git_repo, "diff", "--cached", "--name-only")
     assert is_auto(p) is True
+
+
+
+def test_goto_restores_commit_and_sets_cursor(any_dir):
+    _, d = any_dir
+    p = open_project(d)
+    top = ensure_repo(p).top
+    for i in (1, 2, 3):
+        (p.parts / "a.py").write_text(f"a = {i}\n")
+        checkpoint(p, f"c{i}")
+    head = git(top, "rev-parse", "HEAD")
+    first = next(r["sha"] for r in history(p) if r["msg"] == "cad: c1")
+    line = goto(p, first[:7])
+    assert "\n" not in line and "c1" in line
+    assert (p.parts / "a.py").read_text() == "a = 1\n"
+    assert git(top, "rev-parse", "HEAD") == head
+    forward(p)  # cursor was set to the goto target
+    assert (p.parts / "a.py").read_text() == "a = 2\n"
+    (p.parts / "a.py").write_text("a = unsaved\n")
+    with pytest.raises(VCError):
+        goto(p, head.strip())
+    assert (p.parts / "a.py").read_text() == "a = unsaved\n"
+    with pytest.raises(VCError):
+        goto(p, "0" * 40)

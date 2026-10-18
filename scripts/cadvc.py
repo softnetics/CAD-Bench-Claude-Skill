@@ -346,16 +346,24 @@ def _move(p, step):
         return _summary("at newest", "checkpoint", 0, cps[0]) + " · nothing newer"
     if j >= len(cps):
         return _summary("at oldest", "checkpoint", 0, cps[-1]) + " · nothing older"
+    return _go(repo, state, cps[i], cps[j], "back to" if step > 0 else "forward to")
+
+
+def _go(repo, state, here_sha, target_sha, verb):
+    """Restore cad/ from `target_sha` and park the cursor there.
+
+    Refuses when the working cad/ differs from `here_sha` (unsaved changes).
+    """
     here = _subtree(repo, _snapshot(repo))
-    if _n_changed(repo, here, _cad_tree(repo, cps[i])):
+    if _n_changed(repo, here, _cad_tree(repo, here_sha)):
         raise VCError("cad/ has unsaved changes; checkpoint them before moving back/forward")
-    target = _cad_tree(repo, cps[j])
+    target = _cad_tree(repo, target_sha)
     n = _n_changed(repo, here, target)
     _restore(repo, target)
-    state["cursor"] = cps[j]
+    state["cursor"] = target_sha
     _save_state(repo, state)
-    msg = _git(repo, "log", "-1", "--format=%s", cps[j]).strip()
-    return _summary("back to" if step > 0 else "forward to", msg, n, cps[j])
+    msg = _git(repo, "log", "-1", "--format=%s", target_sha).strip()
+    return _summary(verb, msg, n, target_sha)
 
 
 def back(p) -> str:
@@ -364,6 +372,22 @@ def back(p) -> str:
 
 def forward(p) -> str:
     return _move(p, -1)
+
+
+def goto(p, sha) -> str:
+    """Restore cad/ from any commit (checkpoint or try); back/forward continue from it."""
+    repo = ensure_repo(p)
+    state = _load_state(repo)
+    if state.get("active"):
+        raise VCError(f"experiment '{state['active']}' is active; keep or revert it first")
+    out = _try_git(repo, "rev-parse", "--verify", "-q", f"{sha}^{{commit}}")
+    target = out.strip() if out else None
+    if not target or not _cad_tree(repo, target):
+        raise VCError(f"no cad/ snapshot at {sha}")
+    here = state.get("cursor") or _head(repo)
+    if not here:
+        raise VCError("no checkpoints yet")
+    return _go(repo, state, here, target, "went to")
 
 
 # --------------------------------------------------------------------- settings
