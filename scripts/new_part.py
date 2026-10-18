@@ -82,7 +82,8 @@ def main():
 
     # Parts living in <project>/cad/parts export to <project>/cad/exports.
     out = here
-    if os.path.basename(here) == "parts" and             os.path.basename(os.path.dirname(here)) == "cad":
+    if (os.path.basename(here) == "parts"
+            and os.path.basename(os.path.dirname(here)) == "cad"):
         out = os.path.join(os.path.dirname(here), "exports")
         os.makedirs(out, exist_ok=True)
     B.export_verified(part, os.path.join(out, "{name}.stl"), "{name}")

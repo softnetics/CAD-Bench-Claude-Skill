@@ -51,14 +51,24 @@ def _git(repo, *args, env=None) -> str:
         full_env = dict(os.environ)
         full_env.update(env)
     try:
-        r = subprocess.run(["git", *args], cwd=str(cwd), env=full_env,
+        r = subprocess.run(["git", "-c", "core.longpaths=true", *args], cwd=str(cwd), env=full_env,
                            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8")
     except OSError as e:  # git missing, or a folder Windows can't run in (path over 260 chars)
         raise VCError(f"cannot run git in {cwd}: {e.strerror or e}") from None
     if r.returncode != 0:
-        lines = [ln for ln in (r.stderr or r.stdout).splitlines() if ln.strip()]
-        raise VCError(lines[0] if lines else f"git {args[0]} failed")
+        raise VCError(_error_line(r.stderr or r.stdout, args[0]))
     return r.stdout
+
+
+def _error_line(text, cmd):
+    """The one line that says why git failed: the first `fatal:`/`error:` line,
+    else the last non-empty line that isn't a `warning:` (CRLF notes, hook chatter)."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for ln in lines:
+        if ln.startswith(("fatal:", "error:")):
+            return ln
+    rest = [ln for ln in lines if not ln.startswith("warning:")]
+    return rest[-1] if rest else f"git {cmd} failed"
 
 
 def _try_git(repo, *args, env=None):
@@ -81,7 +91,14 @@ def _temp_index():
 
 def ensure_repo(p) -> Repo:
     p.cad.mkdir(parents=True, exist_ok=True)
-    top = _try_git(p.cad, "rev-parse", "--show-toplevel")
+    try:
+        top = _git(p.cad, "rev-parse", "--show-toplevel")
+    except VCError as e:
+        # Only a folder outside any repo gets its own; dubious ownership,
+        # permission errors and the like are the user's to fix.
+        if "not a git repository" not in str(e):
+            raise
+        top = None
     if top is None:
         _git(p.cad, "init", "-q")
         if not _try_git(p.cad, "config", "user.name"):
@@ -244,7 +261,12 @@ def _branch_commit(repo, msg):
     head = _head(repo)
     if head and _try_git(repo, "diff", "--cached", "--quiet", "HEAD", "--", *_cad_pathspec(repo)) is not None:
         return None, 0
-    _git(repo, "commit", "-q", "-m", msg, "--", *_cad_pathspec(repo))
+    try:
+        _git(repo, "commit", "-q", "-m", msg, "--", *_cad_pathspec(repo))
+    except VCError:
+        # A hook or signing failure: don't leave cad/ staged for the user's next commit.
+        _try_git(repo, "reset", "-q", "--", repo.cad_rel)
+        raise
     sha = _head(repo)
     n = len([ln for ln in _git(repo, "show", "--name-only", "--format=", sha).splitlines() if ln])
     return sha, n

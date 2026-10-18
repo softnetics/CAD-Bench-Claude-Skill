@@ -633,7 +633,9 @@ function showValue(q, v, force){
 function render(){
   const part=P(), p=vals(), d=part.derive(p);
   part.params.forEach(q=>showValue(q, p[q.id]));
-  el("dwg").innerHTML = part.draw(p,d);
+  // draw() is optional (the live bench shows kernel views instead).
+  el("dwg").innerHTML = typeof part.draw === "function" ? part.draw(p,d)
+    : `<text x="310" y="200" text-anchor="middle" font-size="13" fill="var(--ink-2)">No drawing — see the live bench</text>`;
   el("derived").innerHTML = part.cards(d).map(([k,x])=>
     `<div class="d"><span>${k}</span><b>${x}</b></div>`).join("");
   // A check reading an undefined field (`d.foo` where foo lives on `p`) makes

@@ -162,16 +162,17 @@ class Bench:
         over = req.get("params") or {}
         if not isinstance(over, dict):
             raise BadRequest("params must be an object")
-        known = load_model(f).PARAMS
-        values = {k: float(v) for k, v in over.items() if k in known}
-        out = self.p.parts / f"{part}.params.json"
-        out.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
-        res = {"ok": True, "path": str(out)}
-        if cadvc.is_auto(self.p):
-            try:
-                res["checkpoint"] = cadvc.checkpoint(self.p, f"hand-off {part}")
-            except cadvc.VCError as e:
-                res["checkpoint_error"] = one_line(e)
+        with self.build_lock:  # cad/ is rewritten: no build or vc op may read it halfway
+            known = load_model(f).PARAMS
+            values = {k: float(v) for k, v in over.items() if k in known}
+            out = self.p.parts / f"{part}.params.json"
+            out.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
+            res = {"ok": True, "path": str(out)}
+            if cadvc.is_auto(self.p):
+                try:
+                    res["checkpoint"] = cadvc.checkpoint(self.p, f"hand-off {part}")
+                except cadvc.VCError as e:
+                    res["checkpoint_error"] = one_line(e)
         return res
 
     def vc(self, req):

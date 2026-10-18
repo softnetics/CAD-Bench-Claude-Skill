@@ -346,3 +346,72 @@ def test_back_after_goto_try_commit(any_dir):
     line = back(p)  # must not claim unsaved changes
     assert "\n" not in line
     assert (p.parts / "a.py").read_text() == "a = 1\n"
+
+
+def _failing_hook(repo_dir):
+    hook = repo_dir / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\n"
+                    "echo 'warning: LF will be replaced by CRLF in cad/parts/a.py.' >&2\n"
+                    "echo '[INFO] Stashing unstaged files' >&2\n"
+                    "echo 'lint failed: trailing whitespace' >&2\n"
+                    "exit 1\n", newline="\n")
+    hook.chmod(0o755)
+
+
+def test_git_error_line_skips_chatter():
+    from cadvc import _error_line
+    assert _error_line("warning: LF will be replaced by CRLF\nfatal: bad thing\n", "x") == "fatal: bad thing"
+    assert _error_line("[INFO] Stashing\nerror: real reason\nmore\n", "x") == "error: real reason"
+    assert _error_line("[INFO] Stashing\n\nlint failed\nwarning: LF will be replaced\n", "x") == "lint failed"
+    assert _error_line("", "commit") == "git commit failed"
+
+
+def test_hook_failure_reports_reason_and_leaves_nothing_staged(git_repo):
+    p = open_project(git_repo)
+    (p.parts / "a.py").write_text("a = 1\n")
+    checkpoint(p, "base")
+    fw = git_repo / "firmware" / "main.c"
+    fw.write_text("int main(void) { return 9; }\n")
+    git(git_repo, "add", "firmware/main.c")
+    (p.parts / "a.py").write_text("a = 2\n")
+    (p.parts / "b.py").write_text("b = 1\n")
+    _failing_hook(git_repo)
+    head = git(git_repo, "rev-parse", "HEAD")
+    with pytest.raises(VCError) as e:
+        checkpoint(p, "x")
+    assert str(e.value) == "lint failed: trailing whitespace"
+    assert git(git_repo, "diff", "--cached", "--name-only").split() == ["firmware/main.c"]
+    assert git(git_repo, "rev-parse", "HEAD") == head
+    assert (p.parts / "b.py").read_text() == "b = 1\n"
+
+
+def test_ensure_repo_refuses_on_other_rev_parse_failure(plain_dir, monkeypatch):
+    import cadvc
+    real_run = subprocess.run
+
+    def fake_run(cmd, *a, **kw):
+        if cmd[0] == "git" and "--show-toplevel" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 128, "", "fatal: detected dubious ownership in repository at 'x'\n")
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(cadvc.subprocess, "run", fake_run)
+    p = open_project(plain_dir)
+    with pytest.raises(VCError) as e:
+        ensure_repo(p)
+    assert "dubious ownership" in str(e.value) and "\n" not in str(e.value)
+    assert not (p.cad / ".git").exists()
+
+
+def test_git_runs_with_long_paths(plain_dir, monkeypatch):
+    import cadvc
+    seen = []
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **kw):
+        seen.append(cmd)
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(cadvc.subprocess, "run", spy)
+    ensure_repo(open_project(plain_dir))
+    assert seen and all(c[:3] == ["git", "-c", "core.longpaths=true"] for c in seen)

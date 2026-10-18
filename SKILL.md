@@ -310,6 +310,8 @@ in the working folder). Never run git yourself for CAD history.
 - **A refusal is one line on stderr, exit code 1** (detached HEAD, a merge in
   progress, nothing to keep, unsaved changes before `back`). Tell the user
   what it says; never work around it with git.
+- **Checkpoints run the user's git hooks** (no `--no-verify`); a hook
+  failure is reported in one line, with nothing left staged.
 - `revert` keeps the abandoned attempt on the graph with its reason (the
   History tab shows it). `back` / `forward` restore `cad/` without moving
   `HEAD`; the next checkpoint records where you are. Nothing touches files

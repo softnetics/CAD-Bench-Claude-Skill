@@ -1,12 +1,13 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from cadproj import open_project
 from partmodel import build_part, effective_params, load_model
 
 REPO = Path(__file__).resolve().parent.parent
-PY = r"C:\Users\gritp\cad-bench-venv\Scripts\python"
+PY = sys.executable
 
 
 def _scaffold(plain_dir):
@@ -55,3 +56,10 @@ def test_examples_still_work():
     r = subprocess.run([PY, str(REPO / "models" / "boss_plate.py")],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_scaffolded_model_has_no_collapsed_lines(plain_dir):
+    import re
+    src = (_scaffold(plain_dir).parts / "spacer.py").read_text(encoding="utf-8")
+    squashed = [ln for ln in src.splitlines() if re.search(r"\S {3,}\S", ln.split("#")[0])]
+    assert not squashed, squashed

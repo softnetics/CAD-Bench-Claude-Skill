@@ -240,3 +240,20 @@ def test_sense_honours_host_check(bench):
     with pytest.raises(urllib.error.HTTPError) as e:
         urllib.request.urlopen(req, timeout=10)
     assert e.value.code == 403
+
+
+def test_handoff_waits_for_build_lock(plain_dir):
+    import threading
+    from bench_server import Bench
+    subprocess.run([sys.executable, str(REPO / "scripts" / "new_part.py"), "--project",
+                    str(plain_dir), "--name", "spacer", "--params", "w=40,t=3"],
+                   check=True, capture_output=True)
+    bench = Bench(open_project(plain_dir))
+    out = bench.p.parts / "spacer.params.json"
+    with bench.build_lock:  # a build (or vc op) is reading cad/
+        t = threading.Thread(target=bench.handoff, args=({"part": "spacer", "params": {"w": 41}},))
+        t.start()
+        t.join(1.0)
+        assert not out.exists(), "hand-off rewrote cad/ while a build held the lock"
+    t.join(30)
+    assert json.loads(out.read_text(encoding="utf-8")) == {"w": 41.0}

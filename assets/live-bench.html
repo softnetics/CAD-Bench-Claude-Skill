@@ -110,6 +110,8 @@
   .same{stroke:var(--ink-2);stroke-width:1;opacity:.6} .now{stroke:var(--part-line);stroke-width:2.2}
   .was{stroke:var(--warn);stroke-width:2.2;stroke-dasharray:5 3}
   [hidden]{display:none!important}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+  .modal{background:var(--panel);color:var(--ink);border:1px solid var(--rule);border-radius:6px;padding:16px;max-width:420px;font-size:14px}
 </style>
 </head>
 <body>
@@ -164,6 +166,15 @@
         <button data-op="forward">Forward</button>
       </div>
       <div class="msg" id="lb-vc-msg"></div>
+    </div>
+    <div class="modal-overlay" id="lb-move-confirm" hidden>
+      <div class="modal" role="alertdialog" aria-labelledby="lb-move-text">
+        <div id="lb-move-text"></div>
+        <div class="btns" style="margin-top:12px;justify-content:flex-end">
+          <button id="lb-move-no" type="button">Cancel</button>
+          <button id="lb-move-yes" class="primary" type="button">Discard and continue</button>
+        </div>
+      </div>
     </div>
     <div class="hcols" style="margin-top:12px">
       <div class="graph" id="lb-graph"></div>
@@ -251,6 +262,9 @@ function applyPasted(text) {
 }
 // </value-store>
 
+// Any part's values (the value store's vals() is the current part's).
+const valsOf = k => { const s = VALUES[k] || {}, o = {}; PARTS[k].params.forEach(q => o[q.id] = s[q.id]); return o; };
+
 const VIEW_NAMES = ["top", "front", "side", "iso"];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function say(id, text, cls) { const m = el(id); m.textContent = text; m.className = "msg " + (cls || ""); }
@@ -309,6 +323,8 @@ async function loadParts(resetValues) {
   PARTS = {};
   list.forEach(x => PARTS[x.name] = preparePart(x));
   if (resetValues) for (const k of Object.keys(VALUES)) delete VALUES[k];
+  // A part that vanished, or whose values were just reset to disk, gets a new baseline.
+  for (const k of Object.keys(HANDED)) if (resetValues || !PARTS[k]) delete HANDED[k];
   el("lb-part").innerHTML = list.map(x =>
     `<option value="${esc(x.name)}">${esc(PARTS[x.name].label)}</option>`).join("");
   if (!list.length) { KEY = null; el("lb-status").textContent = "no parts in cad/parts yet";
@@ -354,6 +370,7 @@ function buildControls() {
     box.addEventListener("change", () => commitNumbox(q));
     box.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); box.blur(); } });
   });
+  if (!(KEY in HANDED)) markHanded(KEY, vals());   // what params.json holds now
 }
 
 // Typed value: used exactly (no clamp, no snap). Unparseable -> box reverts.
@@ -473,7 +490,9 @@ el("lb-handoff").addEventListener("click", async () => {
   const b = el("lb-handoff");
   b.disabled = true;
   try {
-    const r = await postJSON("/api/handoff", {part: KEY, params: vals()});
+    const params = vals();
+    const r = await postJSON("/api/handoff", {part: KEY, params});
+    if (r.ok) markHanded(KEY, params);
     if (!r.ok) say("lb-handoff-msg", "Hand-off failed: " + r.error, "err");
     else say("lb-handoff-msg", "Wrote " + r.path +
              (r.checkpoint ? " · " + r.checkpoint : "") +
@@ -593,21 +612,51 @@ function showNode() {
 const RESTORES = new Set(["revert", "back", "forward", "goto"]);
 // <vc-ops>
 // A snapshot covers model, slider values and recipe together: ops that
-// snapshot cad/ first hand off ALL current values (written to params.json).
-// If that hand-off fails, the op does not run. tests/js/vc_handoff.test.mjs
-// runs this block.
-const SNAPSHOT_OPS = new Set(["checkpoint", "try", "keep"]);
+// snapshot cad/ first hand off ALL current values (written to params.json);
+// revert snapshots the abandoned try, so it hands off too. If that hand-off
+// fails, the op does not run. Ops that only restore cad/ (back, forward,
+// goto) would drop values not yet handed off, so they ask first (in-page:
+// window.confirm may be blocked). tests/js/vc_handoff.test.mjs runs this block.
+const SNAPSHOT_OPS = new Set(["checkpoint", "try", "keep", "revert"]);
+const MOVE_OPS = new Set(["back", "forward", "goto"]);
+const HANDED = {};   // part -> JSON of its values as last handed off (or loaded from disk)
+function markHanded(k, v) { HANDED[k] = JSON.stringify(v); }
+const unhanded = () => Object.keys(HANDED).filter(k => JSON.stringify(valsOf(k)) !== HANDED[k]);
 async function runVc(op, arg) {
+  if (MOVE_OPS.has(op)) {
+    const parts = unhanded();
+    if (parts.length && !(await askMoveConfirm(
+        `Values in ${parts.join(", ")} were not handed off; ${op} will discard them.`)))
+      return {ok: false, error: `${op} cancelled; values kept`};
+  }
   if (SNAPSHOT_OPS.has(op) && KEY) {
+    const params = vals();
     let h;
-    try { h = await postJSON("/api/handoff", {part: KEY, params: vals()}); }
+    try { h = await postJSON("/api/handoff", {part: KEY, params}); }
     catch (e) { h = {ok: false, error: e.message}; }
     if (!h.ok) return {ok: false, error: `hand-off failed, ${op} not run: ${h.error}`};
+    markHanded(KEY, params);
   }
   try { return await postJSON("/api/vc", {op, arg}); }
   catch (e) { return {ok: false, error: e.message}; }
 }
 // </vc-ops>
+// In-page confirmation for runVc's MOVE_OPS; resolves true (go on) / false.
+function askMoveConfirm(text) {
+  return new Promise(resolve => {
+    el("lb-move-text").textContent = text;
+    el("lb-move-confirm").hidden = false;
+    const done = v => {
+      el("lb-move-confirm").hidden = true;
+      el("lb-move-yes").removeEventListener("click", yes);
+      el("lb-move-no").removeEventListener("click", no);
+      resolve(v);
+    };
+    const yes = () => done(true), no = () => done(false);
+    el("lb-move-yes").addEventListener("click", yes);
+    el("lb-move-no").addEventListener("click", no);
+  });
+}
 async function vc(op, arg, outId) {
   const r = await runVc(op, arg);
   say(outId, r.ok ? r.line : r.error, r.ok ? "ok" : "err");

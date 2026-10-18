@@ -54,3 +54,26 @@ def test_recipe_without_draw_still_checks_the_rest(tmp_path):
     assert r.returncode == 1, r.stdout + r.stderr
     assert "FAIL broken" in r.stdout and "read undefined d.w" in r.stdout
     assert "OK   no-draw" in r.stdout
+
+
+NO_DRAW_ENTRY = """
+"no-draw":{
+  label:"No draw", file:"cad/parts/no_draw.py", note:"",
+  params:[{id:"w",fs:"W",u:"MM",g:"Main",label:"W",min:1,max:10,step:0.5,val:4}],
+  derive(p){ return {half:p.w/2}; },
+  cards:d=>[["Half",d.half.toFixed(2)]],
+  checks(p,d){ return [[d.half>=0.5,"Half is enough",d.half.toFixed(2)+" mm"]]; }
+},
+"""
+
+
+def test_template_renders_recipe_without_draw(tmp_path):
+    src = (REPO / "assets" / "bench-template.html").read_text(encoding="utf-8")
+    assert "const PARTS = {" in src
+    page = tmp_path / "template.html"
+    page.write_text(src.replace("const PARTS = {", "const PARTS = {" + NO_DRAW_ENTRY, 1),
+                    encoding="utf-8")
+    r = subprocess.run([sys.executable, str(CHECK), str(page)], capture_output=True,
+                       text=True, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "OK   no-draw" in r.stdout

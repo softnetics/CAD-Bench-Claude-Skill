@@ -34,6 +34,7 @@ if (!m) { console.log(JSON.stringify({fatal: "no <script> block found"})); proce
 // Minimal DOM/browser stubs: enough for the page's top-level setup to run.
 const stubEl = () => ({innerHTML:'', textContent:'', className:'', value:'0',
                        hidden:false, disabled:false, style:{},
+                       classList:{toggle(){}, add(){}, remove(){}, contains(){return false;}},
                        addEventListener(){}, querySelectorAll(){return [];}});
 global.document = {getElementById: stubEl, querySelectorAll(){return [];}};
 global.localStorage = {getItem(){return '{}';}, setItem(){}};
@@ -324,6 +325,13 @@ try {
         for (const q of P.params)
           for (const v of [q.min, q.max])
             evalAt(Object.assign({}, base, {[q.id]: v}), q.id + '=' + v);
+
+        // The page's own render() at the defaults (bench pages that have one):
+        // a recipe the probe accepts must not make the page itself throw.
+        if (typeof render === 'function' && typeof VALUES === 'object') {
+          try { KEY = key; VALUES[key] = Object.assign({}, base); render(); }
+          catch (e) { rec.problems.push('render() threw ' + e.message); }
+        }
 
         out.parts.push(rec);
       }
