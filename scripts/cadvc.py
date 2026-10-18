@@ -247,21 +247,25 @@ def _branch_commit(repo, msg):
     return sha, n
 
 
-def _sense_note(p):
-    """` · sense: N flags` for the project's parts, or "" (clean, or any failure)."""
+def _sense_note(p, names):
+    """` · sense: N flags` for the parts among `names` (committed paths), or ""."""
     try:
         import sense as _sense  # lazy: pulls in the kernel
         from partmodel import effective_params, load_model
+        stems = set()
+        for nm in names:
+            q = Path(nm)
+            if q.parent.name == "parts":
+                stems.add(q.name.split(".")[0])
         n = 0
-        for f in sorted(p.parts.glob("*.py")):
-            if f.stem.startswith("_"):
-                continue
+        for stem in sorted(stems):
+            f = p.parts / f"{stem}.py"
+            if stem.startswith("_") or not f.is_file():
+                continue  # deleted or private
             model = load_model(f)
-            n += len(_sense.sense(model, effective_params(model, p.parts / f"{f.stem}.params.json")))
+            n += len(_sense.sense(model, effective_params(model, p.parts / f"{stem}.params.json")))
         return f" · sense: {n} flag{'' if n == 1 else 's'}" if n else ""
-    except BaseException as e:
-        if isinstance(e, (KeyboardInterrupt, SystemExit)):
-            raise
+    except Exception:
         return ""
 
 
@@ -279,7 +283,8 @@ def checkpoint(p, name=None) -> str:
         _save_state(repo, state)
     if sha is None:
         return _summary("unchanged", name, 0, _head(repo))
-    return _summary("checkpoint", name, n, sha) + _sense_note(p)
+    names = _git(repo, "show", "--name-only", "--format=", sha).splitlines()
+    return _summary("checkpoint", name, n, sha) + _sense_note(p, names)
 
 
 def try_(p, idea) -> str:

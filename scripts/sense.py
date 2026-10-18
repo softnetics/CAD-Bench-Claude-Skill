@@ -18,6 +18,7 @@ from partmodel import build_part, effective_params, load_model  # noqa: E402
 NO_EFFECT_TOL = 1e-6
 COS_REDUNDANT = 0.999
 SAME_TOL = 1e-6
+ANCHOR_TOL = 0.05
 
 
 def _signature(part):
@@ -75,31 +76,58 @@ def _cos(a, b):
     return sum(x * y for x, y in zip(a, b)) / (na * nb)
 
 
-def sense(model, P, rel_step=0.02):
+def _numeric(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _anchored(circle, sig):
+    """Centre sits on the part's bbox centre in x and y."""
+    bb = sig["bbox"]
+    cx, cy = (bb[0] + bb[3]) / 2.0, (bb[1] + bb[4]) / 2.0
+    return abs(circle[1][0] - cx) <= ANCHOR_TOL and abs(circle[1][1] - cy) <= ANCHOR_TOL
+
+
+def sense(model, P, rel_step=0.02, notes=None):
+    """Flags for `model` at `P`. Skipped nudges are described in `notes` (a list)."""
+    notes = notes if notes is not None else []
     base = _signature(build_part(model, dict(P)))
     flags, vecs = [], {}
-    circle_moved = [False] * len(base["circles"])
+    n_circ = len(base["circles"])
+    circle_moved = [False] * n_circ
+    circle_anchored = [_anchored(c, base) for c in base["circles"]]
     bbox_changed = False
     for name, v in P.items():
-        step = max(abs(v) * rel_step, 0.05)
-        Q = dict(P)
-        Q[name] = v + step
-        try:
-            sig = _signature(build_part(model, Q))
-        except Exception as e:
-            flags.append({"kind": "no_effect", "params": [name],
-                          "detail": f"{name}: nudge skipped, build failed "
-                                    f"({type(e).__name__})"})
+        if not _numeric(v):
             continue
-        vec, moved = _delta(base, sig)
-        circle_moved = [a or b for a, b in zip(circle_moved, moved)]
-        if any(abs(x) > NO_EFFECT_TOL for x in vec[2:8]):
-            bbox_changed = True
-        if max(abs(x) for x in vec) < NO_EFFECT_TOL:
+        step = max(abs(v) * rel_step, 0.05)
+        built = False
+        for sign in (1, -1):
+            Q = dict(P)
+            Q[name] = v + sign * step
+            try:
+                sig = _signature(build_part(model, Q))
+            except Exception as e:
+                notes.append(f"{name}: nudge {'+' if sign > 0 else '-'} skipped, "
+                             f"build failed ({type(e).__name__})")
+                continue
+            built = True
+            vec, moved = _delta(base, sig)
+            if max(abs(x) for x in vec) < NO_EFFECT_TOL:
+                continue
+            circle_moved = [a or b for a, b in zip(circle_moved, moved)]
+            for i, (b, n) in enumerate(zip(base["circles"],
+                                           _match(base["circles"], sig["circles"]))):
+                if n is None or not _anchored(n, sig):
+                    circle_anchored[i] = False
+            if any(abs(x) > NO_EFFECT_TOL for x in vec[2:8]):
+                bbox_changed = True
+            vecs[name] = vec
+            break
+        if not built:
+            continue  # both nudges failed: nothing to say about this parameter
+        if name not in vecs:
             flags.append({"kind": "no_effect", "params": [name],
                           "detail": f"{name}: changing it does not change the part"})
-        else:
-            vecs[name] = vec
     names = list(vecs)
     for i, a in enumerate(names):
         for b in names[i + 1:]:
@@ -107,12 +135,15 @@ def sense(model, P, rel_step=0.02):
                 flags.append({"kind": "redundant", "params": [a, b],
                               "detail": f"{a} and {b} change the part the same way"})
     if bbox_changed:
-        for (r, c), moved in zip(base["circles"], circle_moved):
-            if not moved:
-                flags.append({"kind": "hard_coded", "params": [],
-                              "detail": f"hard-coded: Ø{2 * r:.1f} hole at "
-                                        f"({c[0]:.4g},{c[1]:.4g})"
-                                        + (f" z={c[2]:.4g}" if abs(c[2]) > 1e-9 else "")})
+        seen = set()
+        for (r, c), moved, anch in zip(base["circles"], circle_moved, circle_anchored):
+            key = (round(r, 4), round(c[0], 4), round(c[1], 4))
+            if moved or anch or key in seen:
+                continue
+            seen.add(key)
+            flags.append({"kind": "hard_coded", "params": [],
+                          "detail": f"hard-coded: Ø{2 * r:.1f} hole at "
+                                    f"({c[0]:.4g},{c[1]:.4g})"})
     return flags
 
 
